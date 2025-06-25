@@ -1,0 +1,316 @@
+body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background-color: #f8f9fa;
+    justify-content: center;
+    align-items: center;
+    height: 100%;
+  }
+  .navbar {
+    position: fixed;
+    width:100%;
+    top: 0;
+    left:0;
+    background-color: white;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.136);
+    padding: 20px 0;
+    z-index: 100;
+  }
+  
+  .navbar-container {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 20px;
+    height: 8vh;
+  }
+
+  .nav-logo{
+    text-decoration: none;
+    color: #333;
+    font-size: 24px;
+    font-weight: 500;
+    margin-top: 0;
+    transition: color 0.3s ease;
+  }
+  
+  .logo-img {
+    height: 60px;
+  }
+  
+  .navbar-links {
+    list-style: none;
+    display: flex;
+    gap: 30px;
+  }
+  
+  .nav-link {
+    text-decoration: none;
+    color: #333;
+    font-size: 16px;
+    font-weight: 500;
+    text-transform: uppercase;
+    transition: color 0.3s ease;
+  }
+  
+  .nav-link:hover {
+    color: #80969b; /* Change to your brand's color */
+  }
+
+ 
+
+ /* Global Styles */
+.home-container {
+  font-family: Arial, sans-serif;
+  background-color: #f4f4f4;
+  color: #333;
+}
+
+/* Welcome Section */
+.welcome {
+  text-align:left;
+  margin-top: 100px;
+  font-size: 1.2rem;
+  background-color: #f8f9fa;
+}
+
+.welcome h3 {
+  color: #333;
+  font-weight: bold;
+  background-color: #f8f9fa;
+  margin-left: 10px;
+}
+
+.welcome p {
+  color: #555;
+  margin-left: 50px;
+}
+
+
+
+/* Video Section */
+.video-section {
+  padding: 0px;
+  background-color: #e2e2e2;
+  
+}
+
+.video-section h2 {
+  color: #333;
+  font-size: 1.5rem;
+  text-align: center;
+}
+
+.video-list {
+  display: flex;
+  justify-content: space-around;
+  margin-top: 20px;
+}
+
+.video-item {
+  text-align: center;
+  max-width: 1000px
+}
+
+.video-item h4 {
+  margin-top: 10px;
+  color: #333;
+  font-weight: bold;
+}
+
+.why-choose h2 {
+  font-size: 2rem;
+  margin-bottom: 20px;
+  color: #333;
+  text-align: center;
+}
+
+.benefit-list {
+  display: flex;
+  justify-content: center;
+  gap: 30px;
+  flex-wrap: wrap;
+  margin-bottom: 50px;
+}
+
+.benefit-item {
+  background-color: #fff;
+  padding: 20px;
+  width: 250px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  border-radius: 10px;
+  text-align: left;
+}
+
+.benefit-item h3 {
+  font-size: 1.5rem;
+  color: #333;
+}
+
+.benefit-item p {
+  font-size: 1rem;
+  color: #666;
+  line-height: 1.5;
+}
+
+.benefit-item span {
+  font-size: 2rem;
+  margin-right: 10px;
+}
+.benefit-item:hover {
+  transform: translateY(-5px);
+  transition: transform 0.3s ease-in-out;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.136);
+}
+
+/* sitx App Section */
+.sitx-app-section {
+  text-align: center;
+  margin: 50px 20px;
+}
+
+.sitx-app-section h2 {
+  font-size: 2rem;
+  color: #333;
+}
+
+.highlight {
+  color: #80969b; 
+}
+
+.subtitle {
+  font-size: 1.2rem;
+  color: #666;
+  margin-top: 10px;
+  margin-bottom: 30px;
+}
+
+.sitx-features {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 50px;
+  margin-top: 30px;
+}
+
+.sitx-features ul {
+  list-style: none;
+  padding: 0;
+  text-align: left;
+}
+
+.sitx-features ul li {
+  font-size: 1.1rem;
+  color: #333;
+  margin-bottom: 15px;
+  position: relative;
+  padding-left: 20px;
+}
+
+.sitx-features ul li::before {
+  content: "✓";
+  position: absolute;
+  left: 0;
+  color: #80969b;
+  font-weight: bold;
+}
+
+.app-images {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 15px;
+}
+
+.app-images img {
+  width: 150px;
+  height: auto;
+  border-radius: 15px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+.experience-section {
+  padding: 20px;
+  background-color: #f9f9f9;
+  margin-top: 40px;
+}
+
+.experience-section textarea {
+  width: 100%;
+  padding: 10px;
+  font-size: 1rem;
+}
+
+.experience-section button {
+  margin-top: 10px;
+  padding: 8px 16px;
+  background-color: #80969b;
+  color: white;
+  border: none;
+  border-radius: 4px;
+}
+
+.experience-list {
+  margin-top: 20px;
+}
+
+.experience-item {
+  background: #fff;
+  padding: 10px;
+  margin-bottom: 10px;
+  border-left: 4px solid #80969b;
+}
+
+.experience-section {
+  margin: 40px auto;
+  padding: 20px;
+  max-width: 700px;
+  background-color: #f9f9f9;
+  border-radius: 12px;
+}
+
+.experience-section textarea {
+  width: 100%;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 16px;
+  resize: vertical;
+}
+
+.experience-section button {
+  margin-top: 10px;
+  padding: 10px 20px;
+  background-color: #80969b;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.experience-section button:hover {
+  background-color: #555b5c; /* darker shade of blue */
+}
+
+.submitted-experiences {
+  margin-top: 20px;
+}
+
+.experience-box {
+  background: white;
+  padding: 12px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  margin-bottom: 10px;
+}
+
+
+ 
+
+
+
+
+
+
+
+ 

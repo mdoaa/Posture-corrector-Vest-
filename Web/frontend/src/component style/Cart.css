@@ -1,0 +1,112 @@
+.cart-container {
+    margin-top: 150px;
+    margin-bottom: 200px;
+    display: flex;
+    justify-content: space-between;
+    padding: 0 40px;
+  }
+  
+  .cart-left {
+    flex: 3;
+  }
+  
+  .cart-title {
+    margin-Top: 25px;
+    text-align: center;
+    font-weight: 500;
+    font-family:'Times New Roman', Times, serif;
+  }
+  
+  .cart-item {
+    display: flex;
+    margin-top: 50px;
+    margin-bottom: 40px;
+    border-bottom: 1px solid #ccc;
+    border-top: 1px solid #ccc;
+    padding-bottom: 20px;
+  }
+  
+  .cart-item img {
+    width: 100px;
+    height: 100px;
+    object-fit: contain;
+    margin-right: 20px;
+  }
+  
+  .cart-item-details {
+    flex: 2;
+  }
+  
+  .cart-item-price {
+    flex: 1;
+    text-align: right;
+  }
+  
+  .cart-subtotal {
+    flex: 1;
+    margin-left: 40px;
+    background: #f9f9f9;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+  }
+  
+  .cart-subtotal h2 {
+    margin-bottom: 10px;
+  }
+  
+  .cart-subtotal p {
+    margin: 10px 0;
+  }
+  
+  .subtotal-amount {
+    font-size: 24px;
+    font-weight: bold;
+  }
+  
+  .checkout-btn,
+  .continue-btn {
+    width: 100%;
+    padding: 12px;
+    font-size: 16px;
+    border-radius: 5px;
+    margin-top: 10px;
+  }
+  
+  .checkout-btn {
+    background-color: #80969b;
+    color: white;
+    border: none;
+  }
+  
+  .continue-btn {
+    background-color: #fff;
+    border: 1px solid #ccc;
+  }
+  .qty-input {
+    width: 60px;
+    padding: 5px;
+    font-size: 16px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+  }
+  
+  
+  /* Show arrows in Chrome/Safari */
+  .qty-input::-webkit-outer-spin-button,
+  .qty-input::-webkit-inner-spin-button {
+    opacity: 1;
+    cursor: pointer;
+  }
+  .checkout-btn:hover {
+    background-color: #6c7374; /* Darker green on hover */
+    transform: scale(1.05);     /* Slightly enlarge the button */
+    cursor: pointer;
+}
+
+.continue-btn:hover {
+    background-color: #f0f0f0; /* Light gray on hover */
+    border-color: #bbb;         /* Darken border color */
+    transform: scale(1.05);      /* Slightly enlarge the button */
+    cursor: pointer;
+}
