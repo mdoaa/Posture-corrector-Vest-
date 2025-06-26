@@ -68,7 +68,7 @@ https://drive.google.com/file/d/1UR265-_eRpMQxiD5YB1Wy9py6V8c10Ck/view
 |---------------------|---------------------------------|--------|
 | Doaa Mohamed        | Web Developer                   | https://github.com/mdoaa |
 | Abdulrahman Ehab    | Hardware design                       |  |
-| Rawan Ahmed         | Mobile Developer                |  |
+| Rawan Ahmed         | Mobile Developer                |https://github.com/rrahmed43  |
 | Omar Ahmed          | Data Analysis and hardware code                 | https://github.com/Opop1omar4645545  |
 | Farah Abdel-Fattah  | Connecting hardware to software |  |
 
