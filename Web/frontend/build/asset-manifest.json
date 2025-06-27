@@ -1,0 +1,13 @@
+{
+  "files": {
+    "main.css": "/Posture-corrector-Vest-/static/css/main.e412265d.css",
+    "main.js": "/Posture-corrector-Vest-/static/js/main.a3c1a162.js",
+    "index.html": "/Posture-corrector-Vest-/index.html",
+    "main.e412265d.css.map": "/Posture-corrector-Vest-/static/css/main.e412265d.css.map",
+    "main.a3c1a162.js.map": "/Posture-corrector-Vest-/static/js/main.a3c1a162.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.e412265d.css",
+    "static/js/main.a3c1a162.js"
+  ]
+}
