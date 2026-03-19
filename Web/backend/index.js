@@ -45,6 +45,7 @@ const io = new Server(server, {
 const MQTT_BROKER = "mqtts://dbaf8b5235624f2385e15c4fd453a600.s1.eu.hivemq.cloud:8883"; 
 const MQTT_TOPIC_DATA = "SitGuard/sensor/data/12345";
 const MQTT_TOPIC_CONTROL = "SitGuard/device/control/12345";
+const MQTT_TOPIC_LOGS = "SitGuard/backend/logs/12345";
 
 const mqttOptions = {
   username: "opop1omar",
@@ -53,6 +54,17 @@ const mqttOptions = {
 
 const mqttClient = mqtt.connect(MQTT_BROKER, mqttOptions);
 
+const publishMqttLog = (event, details = {}) => {
+  const logPayload = {
+    source: "backend",
+    event,
+    ts: new Date().toISOString(),
+    ...details,
+  };
+
+  mqttClient.publish(MQTT_TOPIC_LOGS, JSON.stringify(logPayload));
+};
+
 mqttClient.on("connect", () => {
   console.log("Connected to Secure HiveMQ Cloud ✅");
   mqttClient.subscribe(MQTT_TOPIC_DATA, (err) => {
@@ -60,6 +72,18 @@ mqttClient.on("connect", () => {
       console.log(`Subscribed to MQTT Topic: ${MQTT_TOPIC_DATA}`);
     }
   });
+});
+
+mqttClient.on("error", (err) => {
+  console.error("MQTT client error:", err.message);
+});
+
+mqttClient.on("offline", () => {
+  console.warn("MQTT client is offline");
+});
+
+mqttClient.on("reconnect", () => {
+  console.warn("MQTT client reconnecting...");
 });
 
 // استقبال البيانات من الأردوينو عبر الـ MQTT بدلاً من HTTP
@@ -158,31 +182,65 @@ const processSensorPayload = async (payload) => {
 // Socket.io listeners from web dashboard (تم تفعيل الأزرار لترسل عبر MQTT).
 io.on("connection", (socket) => {
   console.log("Client connected to socket.io");
+  publishMqttLog("socket_connected", { socketId: socket.id });
+
+  const publishControlCommand = (sourceEvent, payload, successMessage) => {
+    const command = JSON.stringify(payload);
+    publishMqttLog("control_event_received", {
+      socketId: socket.id,
+      sourceEvent,
+      payload,
+    });
+
+    mqttClient.publish(MQTT_TOPIC_CONTROL, command, (err) => {
+      if (err) {
+        publishMqttLog("control_publish_failed", {
+          socketId: socket.id,
+          sourceEvent,
+          topic: MQTT_TOPIC_CONTROL,
+          error: err.message,
+        });
+        socket.emit("controlStatus", {
+          ok: false,
+          message: `${sourceEvent} command failed to send`,
+          error: err.message,
+        });
+        return;
+      }
+
+      publishMqttLog("control_publish_success", {
+        socketId: socket.id,
+        sourceEvent,
+        topic: MQTT_TOPIC_CONTROL,
+        command: payload,
+      });
+      socket.emit("controlStatus", { ok: true, message: successMessage });
+    });
+  };
 
   // تفعيل/إلغاء وضع التحكم اليدوي
   socket.on("manualControl", (data) => {
     // data.state should be true or false
-    const command = JSON.stringify({ cmd: "manual", state: data.state });
-    mqttClient.publish(MQTT_TOPIC_CONTROL, command);
-    socket.emit("controlStatus", { ok: true, message: `Manual mode set to ${data.state}` });
+    publishControlCommand(
+      "manualControl",
+      { cmd: "manual", state: data?.state },
+      `Manual mode set to ${data?.state}`
+    );
   });
 
   // زرار النفخ
   socket.on("inflate", () => {
-    const command = JSON.stringify({ cmd: "inflate" });
-    mqttClient.publish(MQTT_TOPIC_CONTROL, command);
-    socket.emit("controlStatus", { ok: true, message: "Inflate command sent via MQTT" });
+    publishControlCommand("inflate", { cmd: "inflate" }, "Inflate command sent via MQTT");
   });
 
   // زرار التفريغ
   socket.on("deflate", () => {
-    const command = JSON.stringify({ cmd: "deflate" });
-    mqttClient.publish(MQTT_TOPIC_CONTROL, command);
-    socket.emit("controlStatus", { ok: true, message: "Deflate command sent via MQTT" });
+    publishControlCommand("deflate", { cmd: "deflate" }, "Deflate command sent via MQTT");
   });
 
   socket.on("disconnect", () => {
     console.log("Client disconnected from socket.io");
+    publishMqttLog("socket_disconnected", { socketId: socket.id });
   });
 });
 
