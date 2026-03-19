@@ -4,8 +4,7 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <WiFi.h>
-#include <WiFiClientSecure.h>
-#include <PubSubClient.h>      // بدلاً من HTTPClient.h
+#include <mqtt_client.h>
 #include <ArduinoJson.h>
 #include <BLEDevice.h>
 #include <BLEServer.h>
@@ -144,17 +143,13 @@ char bleNewPassword[65] = "";
 // ==========================================
 // إعدادات الـ MQTT (بدلاً من إعدادات الـ HTTP)
 // ==========================================
-const char* mqtt_server = "dbaf8b5235624f2385e15c4fd453a600.s1.eu.hivemq.cloud";
-// Web endpoint requested: wss://...:8884/mqtt (for web clients only).
-// ESP32 PubSubClient uses native MQTT over TLS, so it must use port 8883.
-const int mqtt_port = 8883;
+const char* mqtt_ws_uri = "wss://dbaf8b5235624f2385e15c4fd453a600.s1.eu.hivemq.cloud:8884/mqtt";
 const char* mqtt_user = "opop1omar";     
 const char* mqtt_password = "elpop2030aZ##";   
 const char* topic_data = "SitGuard/sensor/data/12345";
 const char* topic_control = "SitGuard/device/control/12345";
 
-WiFiClientSecure espClient;
-PubSubClient mqttClient(espClient);
+esp_mqtt_client_handle_t mqttClient = nullptr;
 // ==========================================
 
 PosturePercentages percentages;
@@ -188,14 +183,13 @@ bool postSensorData(const char* payload);
 void startPumpOperation(int duration);
 void openValve();
 void updateOLED();
+static void mqttEventHandler(void* handler_args, esp_event_base_t base, int32_t event_id, void* event_data);
 
 // ==========================================
 // دالة استقبال الأوامر من زراير الويب عبر MQTT
 // ==========================================
-void mqttCallback(char* topic, byte* payload, unsigned int length) {
-  String message = "";
-  for (int i = 0; i < length; i++) message += (char)payload[i];
-  Serial.println("MQTT Topic: " + String(topic));
+void mqttCallback(const String& topic, const String& message) {
+  Serial.println("MQTT Topic: " + topic);
   Serial.println("MQTT CMD Received: " + message);
 
   StaticJsonDocument<256> doc;
@@ -221,31 +215,85 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   updateOLED();
 }
 
+static void mqttEventHandler(void* handler_args, esp_event_base_t base, int32_t event_id, void* event_data) {
+  (void)handler_args;
+  (void)base;
+
+  esp_mqtt_event_handle_t event = (esp_mqtt_event_handle_t)event_data;
+
+  switch ((esp_mqtt_event_id_t)event_id) {
+    case MQTT_EVENT_CONNECTED: {
+      Serial.println("connected");
+      int subId = esp_mqtt_client_subscribe(mqttClient, topic_control, 0);
+      bool subOk = subId >= 0;
+      Serial.println(subOk ? "MQTT subscribe OK" : "MQTT subscribe FAILED");
+      if (subOk) {
+        Serial.println("Subscribed topic: " + String(topic_control));
+      }
+      states.mqttConnected = true;
+      lastLog = "MQTT Connected";
+      updateOLED();
+      break;
+    }
+
+    case MQTT_EVENT_DISCONNECTED:
+      states.mqttConnected = false;
+      lastLog = "MQTT Failed";
+      updateOLED();
+      break;
+
+    case MQTT_EVENT_DATA: {
+      String topic;
+      topic.reserve(event->topic_len);
+      for (int i = 0; i < event->topic_len; i++) topic += event->topic[i];
+
+      String payload;
+      payload.reserve(event->data_len);
+      for (int i = 0; i < event->data_len; i++) payload += event->data[i];
+
+      mqttCallback(topic, payload);
+      break;
+    }
+
+    default:
+      break;
+  }
+}
+
 // دالة الاتصال بالـ MQTT باليوزر والباسورد
 void reconnectMQTT() {
   if (!states.wifiConnected) return;
-  if (mqttClient.connected()) return;
+  if (states.mqttConnected) return;
 
   Serial.print("Attempting MQTT connection...");
-  String clientId = "SitGuard-ESP-";
-  clientId += String(random(0xffff), HEX);
 
-  // الاتصال مع اليوزر والباسورد (احذفهم لو هتستخدم وسيط عام بدون حماية)
-  if (mqttClient.connect(clientId.c_str(), mqtt_user, mqtt_password)) {
-    Serial.println("connected");
-    bool subOk = mqttClient.subscribe(topic_control); // الاشتراك في مسار الأوامر
-    Serial.println(subOk ? "MQTT subscribe OK" : "MQTT subscribe FAILED");
-    if (subOk) {
-      Serial.println("Subscribed topic: " + String(topic_control));
+  if (mqttClient == nullptr) {
+    esp_mqtt_client_config_t mqttConfig = {};
+    mqttConfig.uri = mqtt_ws_uri;
+    mqttConfig.username = mqtt_user;
+    mqttConfig.password = mqtt_password;
+    mqttConfig.disable_auto_reconnect = false;
+
+    mqttClient = esp_mqtt_client_init(&mqttConfig);
+    if (mqttClient == nullptr) {
+      Serial.println("failed to init");
+      states.mqttConnected = false;
+      lastLog = "MQTT Failed";
+      updateOLED();
+      return;
     }
-    states.mqttConnected = true;
-    lastLog = "MQTT Connected";
-  } else {
-    Serial.print("failed, rc=");
-    Serial.print(mqttClient.state());
-    states.mqttConnected = false;
-    lastLog = "MQTT Failed";
+
+    esp_mqtt_client_register_event(
+      mqttClient,
+      (esp_mqtt_event_id_t)ESP_EVENT_ANY_ID,
+      mqttEventHandler,
+      nullptr
+    );
+    esp_mqtt_client_start(mqttClient);
+    return;
   }
+
+  esp_mqtt_client_reconnect(mqttClient);
   updateOLED();
 }
 // ==========================================
@@ -344,13 +392,14 @@ void printSystemStatus() {
 
 // تعديل الدالة لترسل عبر الـ MQTT بدلاً من HTTP
 bool postSensorData(const char* payload) {
-  if (!mqttClient.connected()) {
+  if (!states.mqttConnected || mqttClient == nullptr) {
     states.mqttConnected = false;
     return false;
   }
   
   // إرسال البيانات
-  bool ok = mqttClient.publish(topic_data, payload);
+  int msgId = esp_mqtt_client_publish(mqttClient, topic_data, payload, 0, 0, 0);
+  bool ok = msgId >= 0;
   states.mqttConnected = ok;
   return ok;
 }
@@ -713,16 +762,7 @@ void setup() {
   }
 
   setupWiFi();
-
-  // HiveMQ Cloud on 8883 requires TLS.
-  // For quick testing we skip certificate validation.
-  // Replace with setCACert(...) in production.
-  espClient.setInsecure();
-  
-  // تهيئة إعدادات الـ MQTT
-  mqttClient.setServer(mqtt_server, mqtt_port);
-  mqttClient.setCallback(mqttCallback);
-  mqttClient.setBufferSize(1024);
+  reconnectMQTT();
 
   setupBLE();
     
@@ -740,16 +780,11 @@ void loop() {
   checkNetwork();
 
   // فحص حالة الـ MQTT وإعادة الاتصال إذا لزم الأمر
-  if (states.wifiConnected && !mqttClient.connected()) {
+  if (states.wifiConnected && !states.mqttConnected) {
     if (now - timeKeeper.lastReconnectAttempt > 5000) {
       timeKeeper.lastReconnectAttempt = now;
       reconnectMQTT();
     }
-  }
-  
-  // الاستماع المستمر لأوامر الويب
-  if (mqttClient.connected()) {
-    mqttClient.loop();
   }
 
   // Apply new WiFi credentials received over BLE
