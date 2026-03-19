@@ -28,7 +28,6 @@ app.use(express.json());
 const port = process.env.PORT || 8080;
 const server = http.createServer(app);
 const allowedOrigins = [
-  "http://localhost:3000",
   "https://sitxnew.vercel.app",
 ];
 
