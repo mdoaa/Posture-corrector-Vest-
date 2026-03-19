@@ -116,7 +116,7 @@ class Sensors extends GetxController {
       print('🟢 Connected to WebSocket');
     });
 
-    socket.on('sensorHistory', (data) {
+    socket.on('sensorHistoryData', (data) {
       print('📥 Received data: $data');
       int slouchycount = data['i'] ?? 0;
       int lsideCounter = data['g'] ?? 0;

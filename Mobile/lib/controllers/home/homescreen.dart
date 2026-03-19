@@ -40,31 +40,29 @@ class HomeController extends GetxController with GetTickerProviderStateMixin {
   // Pneumatic control methods
   void toggleManualControl() {
     manualControl.value = !manualControl.value;
-    socket.emit('manualControl', {'enabled': manualControl.value});
+    socket.emit('manualControl', {'state': manualControl.value});
     print('📤 Sent manual control: ${manualControl.value}');
   }
 
   void inflatePressed() {
     inflateActive.value = true;
-    socket.emit('inflate', {'active': true});
+    socket.emit('inflate');
     print('📤 Inflate activated');
   }
 
   void inflateReleased() {
     inflateActive.value = false;
-    socket.emit('inflate', {'active': false});
     print('📤 Inflate deactivated');
   }
 
   void deflatePressed() {
     deflateActive.value = true;
-    socket.emit('deflate', {'active': true});
+    socket.emit('deflate');
     print('📤 Deflate activated');
   }
 
   void deflateReleased() {
     deflateActive.value = false;
-    socket.emit('deflate', {'active': false});
     print('📤 Deflate deactivated');
   }
 
@@ -86,6 +84,18 @@ class HomeController extends GetxController with GetTickerProviderStateMixin {
     socket.onConnect((_) {
       print('🟢 Connected to WebSocket');
     });
+    socket.on('controlStatus', (data) {
+      print('🎛️ Control status from backend: $data');
+    });
+
+    socket.onConnectError((err) {
+      print('❌ WebSocket connect error: $err');
+    });
+
+    socket.onError((err) {
+      print('❌ WebSocket error: $err');
+    });
+
     socket.on('sensorData', (data) {
       print('📥 Received data: $data');
       int slouchycount = data['i'] ?? 0;

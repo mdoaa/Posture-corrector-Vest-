@@ -59,7 +59,7 @@ class StateScreenController extends GetxController {
       print('🟢 State Screen: Connected to WebSocket');
     });
 
-    socket.on('sensorHistory', (data) {
+    socket.on('sensorHistoryData', (data) {
       print('📥 State Screen: Received real-time data');
       _processRealtimeData(data);
     });

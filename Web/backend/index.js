@@ -62,6 +62,8 @@ const publishMqttLog = (event, details = {}) => {
     ...details,
   };
 
+  // Keep local debug visibility in Node console while mirroring logs to MQTT.
+  console.log("[CTRL-LOG]", JSON.stringify(logPayload));
   mqttClient.publish(MQTT_TOPIC_LOGS, JSON.stringify(logPayload));
 };
 
