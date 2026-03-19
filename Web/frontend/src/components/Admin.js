@@ -13,13 +13,13 @@ const Admin = () => {
     const fetchData = async () => {
       try {
         const [productsRes, statsRes, visitsRes] = await Promise.all([
-          axios.get("https://sitx.onrender.com/product", {
+          axios.get("https://sitx-backend-new.onrender.com/product", {
             withCredentials: true,
           }),
-          axios.get("https://sitx.onrender.com/admin/dashboard-stats", {
+          axios.get("https://sitx-backend-new.onrender.com/admin/dashboard-stats", {
             withCredentials: true,
           }),
-          axios.get("https://sitx.onrender.com/visits/count", {
+          axios.get("https://sitx-backend-new.onrender.com/visits/count", {
             withCredentials: true,
           }),
         ]);

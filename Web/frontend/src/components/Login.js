@@ -19,7 +19,7 @@ const Login = () => {
     try {
       setLoading(true);
       const response = await axios.post(
-        "https://sitx.onrender.com/login",
+        "https://sitx-backend-new.onrender.com/login",
         { email, password },
         { withCredentials: true }
       );
@@ -38,7 +38,7 @@ const Login = () => {
 
   // You are using backend redirect OAuth, so success just triggers redirect
   const handleGoogleLogin = () => {
-  window.location.href = "https://sitx.onrender.com/auth/google";
+  window.location.href = "https://sitx-backend-new.onrender.com/auth/google";
 };
 
   return (

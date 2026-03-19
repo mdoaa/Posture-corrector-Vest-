@@ -18,7 +18,7 @@ const Home = () => {
 
       axios
         .post(
-          "https://sitx.onrender.com/merge",
+          "https://sitx-backend-new.onrender.com/merge",
           { userId, guestId },
           { withCredentials: true }
         )
@@ -26,13 +26,13 @@ const Home = () => {
     }
 
     axios
-      .get("https://sitx.onrender.com/experience")
+      .get("https://sitx-backend-new.onrender.com/experience")
       .then((res) => setSubmittedExperiences(res.data))
       .catch((err) => console.error("Failed to load experiences:", err));
   }, [user]);
 
   useEffect(() => {
-    fetch("https://sitx.onrender.com/track-visit", { method: "POST" });
+    fetch("https://sitx-backend-new.onrender.com/track-visit", { method: "POST" });
   }, []);
 
   const handleExperienceSubmit = (e) => {
@@ -45,7 +45,7 @@ const Home = () => {
     };
 
     axios
-      .post("https://sitx.onrender.com/experience", newEntry)
+      .post("https://sitx-backend-new.onrender.com/experience", newEntry)
       .then(() => {
         setSubmittedExperiences([
           { ...newEntry, date: new Date().toLocaleString() },

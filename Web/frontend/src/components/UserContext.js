@@ -8,7 +8,7 @@ export const UserProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    axios.get("https://sitx.onrender.com/profile", { withCredentials: true })
+    axios.get("https://sitx-backend-new.onrender.com/profile", { withCredentials: true })
       .then((res) => {
         setUser(res.data);
         setLoading(false);

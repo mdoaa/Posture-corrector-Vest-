@@ -8,7 +8,7 @@ const GoogleSuccess = () => {
   useEffect(() => {
     const fetchUser = async () => {
       try {
-        const res = await axios.get("https://sitx.onrender.com/profile", {
+        const res = await axios.get("https://sitx-backend-new.onrender.com/profile", {
           withCredentials: true,
         });
 

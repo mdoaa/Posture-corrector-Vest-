@@ -20,7 +20,7 @@ export const CartProvider = ({ children }) => {
 
   // ✅ API inside component + memoized (so it can be a valid dependency)
   const API = useMemo(
-    () => process.env.REACT_APP_API_URL || "https://sitx.onrender.com",
+    () => process.env.REACT_APP_API_URL || "https://sitx-backend-new.onrender.com",
     []
   );
 

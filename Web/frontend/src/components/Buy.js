@@ -21,7 +21,7 @@ const Buy = () => {
 
   useEffect(() => {
     axios
-      .get("https://sitx.onrender.com/products")
+      .get("https://sitx-backend-new.onrender.com/products")
       .then((res) => {
         setProducts(res.data);
         if (res.data.length > 0) {

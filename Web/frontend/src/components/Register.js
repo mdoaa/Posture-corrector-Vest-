@@ -26,7 +26,7 @@ const Register = () => {
 
     try {
       setRegistering(true);
-      const response = await axios.post("https://sitx.onrender.com/register", {
+      const response = await axios.post("https://sitx-backend-new.onrender.com/register", {
         username,
         email,
         password,
@@ -51,7 +51,7 @@ const Register = () => {
 
     try {
       setSendingOtp(true);
-      const response = await axios.post("https://sitx.onrender.com/send-otp", {
+      const response = await axios.post("https://sitx-backend-new.onrender.com/send-otp", {
         email,
       });
       alert(response.data?.message || "OTP sent!");
@@ -69,7 +69,7 @@ const Register = () => {
 
     try {
       setVerifyingOtp(true);
-      const response = await axios.post("https://sitx.onrender.com/verify-otp", {
+      const response = await axios.post("https://sitx-backend-new.onrender.com/verify-otp", {
         email,
         otp,
       });

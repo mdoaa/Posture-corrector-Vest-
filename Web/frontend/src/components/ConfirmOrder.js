@@ -41,7 +41,7 @@ const ConfirmOrder = () => {
     }
 
     try {
-      const response = await axios.post("https://sitx.onrender.com/confirm", {
+      const response = await axios.post("https://sitx-backend-new.onrender.com/confirm", {
         userId: user ? user._id : guestId,
         items: products.map((p) => ({
           productId: p._id,
@@ -209,7 +209,7 @@ const ConfirmOrder = () => {
                   >
                     <div className="overflow-hidden rounded-xl border border-black/10 bg-slate-50">
                       <img
-                        src={`https://sitx.onrender.com/uploads/${product.image}`}
+                        src={`https://sitx-backend-new.onrender.com/uploads/${product.image}`}
                         alt={product.name || "Product"}
                         className="h-16 w-16 object-cover"
                       />

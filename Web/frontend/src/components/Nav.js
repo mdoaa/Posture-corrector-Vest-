@@ -13,7 +13,7 @@ const NavBar = () => {
   const handleLogout = async () => {
     try {
       await axios.post(
-        "https://sitx.onrender.com/logout",
+        "https://sitx-backend-new.onrender.com/logout",
         {},
         { withCredentials: true },
       );

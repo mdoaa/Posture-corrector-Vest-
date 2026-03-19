@@ -63,7 +63,7 @@ const Cart = () => {
                     <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
                       <div className="overflow-hidden rounded-2xl border border-black/10 bg-white">
                         <img
-                          src={`https://sitx.onrender.com/uploads/${product.image}`}
+                          src={`https://sitx-backend-new.onrender.com/uploads/${product.image}`}
                           alt={product.name}
                           className="h-32 w-full object-cover sm:h-28 sm:w-28"
                         />

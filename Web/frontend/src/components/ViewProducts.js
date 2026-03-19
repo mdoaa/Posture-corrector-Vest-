@@ -27,7 +27,7 @@ const ViewProducts = () => {
     const fetchProducts = async () => {
       try {
         setError("");
-        const response = await axios.get("https://sitx.onrender.com/admin/product", {
+        const response = await axios.get("https://sitx-backend-new.onrender.com/admin/product", {
           withCredentials: true,
         });
         setProducts(response.data.products || []);
@@ -61,7 +61,7 @@ const ViewProducts = () => {
       image: null,
     });
     setImagePreview(
-      product.image ? `https://sitx.onrender.com/uploads/${product.image}` : ""
+      product.image ? `https://sitx-backend-new.onrender.com/uploads/${product.image}` : ""
     );
   };
 
@@ -106,7 +106,7 @@ const ViewProducts = () => {
       if (editForm.image) formData.append("image", editForm.image);
 
       const response = await axios.put(
-        `https://sitx.onrender.com/admin/products/${editingProductId}`,
+        `https://sitx-backend-new.onrender.com/admin/products/${editingProductId}`,
         formData,
         {
           withCredentials: true,
@@ -192,7 +192,7 @@ const ViewProducts = () => {
                       isEditing
                         ? imagePreview || "https://via.placeholder.com/600x600?text=No+Image"
                         : product.image
-                        ? `https://sitx.onrender.com/uploads/${product.image}`
+                        ? `https://sitx-backend-new.onrender.com/uploads/${product.image}`
                         : "https://via.placeholder.com/600x600?text=No+Image"
                     }
                     alt={product.name}

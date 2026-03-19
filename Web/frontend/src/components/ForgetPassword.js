@@ -27,7 +27,7 @@ const ForgetPassword = () => {
 
     try {
       setSendingOtp(true);
-      const response = await axios.post("https://sitx.onrender.com/send-otp", {
+      const response = await axios.post("https://sitx-backend-new.onrender.com/send-otp", {
         email,
       });
       alert(response.data?.message || "OTP sent!");
@@ -46,7 +46,7 @@ const ForgetPassword = () => {
     try {
       setVerifyingOtp(true);
       const response = await axios.post(
-        "https://sitx.onrender.com/verify-otp",
+        "https://sitx-backend-new.onrender.com/verify-otp",
         {
           email,
           otp,
@@ -71,7 +71,7 @@ const ForgetPassword = () => {
     try {
       setUpdating(true);
       const response = await axios.put(
-        "https://sitx.onrender.com/forget-password",
+        "https://sitx-backend-new.onrender.com/forget-password",
         {
           email,
           password: newPassword,

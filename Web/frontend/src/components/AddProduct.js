@@ -56,7 +56,7 @@ const AddProduct = () => {
 
     try {
       setSubmitting(true);
-      const res = await axios.post("https://sitx.onrender.com/products", data, {
+      const res = await axios.post("https://sitx-backend-new.onrender.com/products", data, {
         headers: { "Content-Type": "multipart/form-data" },
         withCredentials: true,
       });
