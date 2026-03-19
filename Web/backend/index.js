@@ -27,10 +27,16 @@ const app = express();
 app.use(express.json());
 const port = process.env.PORT || 8080;
 const server = http.createServer(app);
+const allowedOrigins = [
+  "http://localhost:3000",
+  "https://sitxnew.vercel.app",
+];
+
 const io = new Server(server, {
   cors: {
-    origin: "*", // or your Flutter app URL
+    origin: allowedOrigins,
     methods: ["GET", "POST"],
+    credentials: true,
   },
 });
 
@@ -183,9 +189,21 @@ io.on("connection", (socket) => {
 
 // middleware
 app.use(cookieParser());
+
 app.use(
   cors({
-    origin: "http://localhost:3000", // Allow requests from React frontend
+    origin: (origin, callback) => {
+      // Allow server-to-server and tools without an Origin header.
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(new Error("Not allowed by CORS"));
+    },
     credentials: true, // If sending cookies or authentication headers
   })
 );
