@@ -4,6 +4,7 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <PubSubClient.h>      // بدلاً من HTTPClient.h
 #include <ArduinoJson.h>
 #include <BLEDevice.h>
@@ -143,14 +144,16 @@ char bleNewPassword[65] = "";
 // ==========================================
 // إعدادات الـ MQTT (بدلاً من إعدادات الـ HTTP)
 // ==========================================
-const char* mqtt_server = "dbaf8b5235624f2385e15c4fd453a600.s1.eu.hivemq.cloud"; 
+const char* mqtt_server = "dbaf8b5235624f2385e15c4fd453a600.s1.eu.hivemq.cloud";
+// Web endpoint requested: wss://...:8884/mqtt (for web clients only).
+// ESP32 PubSubClient uses native MQTT over TLS, so it must use port 8883.
 const int mqtt_port = 8883;
 const char* mqtt_user = "opop1omar";     
 const char* mqtt_password = "elpop2030aZ##";   
 const char* topic_data = "SitGuard/sensor/data/12345";
 const char* topic_control = "SitGuard/device/control/12345";
 
-WiFiClient espClient;
+WiFiClientSecure espClient;
 PubSubClient mqttClient(espClient);
 // ==========================================
 
@@ -192,6 +195,7 @@ void updateOLED();
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
   String message = "";
   for (int i = 0; i < length; i++) message += (char)payload[i];
+  Serial.println("MQTT Topic: " + String(topic));
   Serial.println("MQTT CMD Received: " + message);
 
   StaticJsonDocument<256> doc;
@@ -229,7 +233,11 @@ void reconnectMQTT() {
   // الاتصال مع اليوزر والباسورد (احذفهم لو هتستخدم وسيط عام بدون حماية)
   if (mqttClient.connect(clientId.c_str(), mqtt_user, mqtt_password)) {
     Serial.println("connected");
-    mqttClient.subscribe(topic_control); // الاشتراك في مسار الأوامر
+    bool subOk = mqttClient.subscribe(topic_control); // الاشتراك في مسار الأوامر
+    Serial.println(subOk ? "MQTT subscribe OK" : "MQTT subscribe FAILED");
+    if (subOk) {
+      Serial.println("Subscribed topic: " + String(topic_control));
+    }
     states.mqttConnected = true;
     lastLog = "MQTT Connected";
   } else {
@@ -705,10 +713,16 @@ void setup() {
   }
 
   setupWiFi();
+
+  // HiveMQ Cloud on 8883 requires TLS.
+  // For quick testing we skip certificate validation.
+  // Replace with setCACert(...) in production.
+  espClient.setInsecure();
   
   // تهيئة إعدادات الـ MQTT
   mqttClient.setServer(mqtt_server, mqtt_port);
   mqttClient.setCallback(mqttCallback);
+  mqttClient.setBufferSize(1024);
 
   setupBLE();
     

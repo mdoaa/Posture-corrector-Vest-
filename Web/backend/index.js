@@ -42,7 +42,7 @@ const io = new Server(server, {
 // ==========================================
 // إعدادات الـ MQTT المحمي (HiveMQ Cloud 24/7)
 // ==========================================
-const MQTT_BROKER = "mqtts://dbaf8b5235624f2385e15c4fd453a600.s1.eu.hivemq.cloud:8883"; 
+const MQTT_BROKER = "wss://dbaf8b5235624f2385e15c4fd453a600.s1.eu.hivemq.cloud:8884/mqtt";
 const MQTT_TOPIC_DATA = "SitGuard/sensor/data/12345";
 const MQTT_TOPIC_CONTROL = "SitGuard/device/control/12345";
 const MQTT_TOPIC_LOGS = "SitGuard/backend/logs/12345";
