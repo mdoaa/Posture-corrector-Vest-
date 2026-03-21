@@ -78,12 +78,6 @@ class StateScreenController extends GetxController {
       rightCount.value = data['f'] ?? rightCount.value;
       normalCount.value = data['h'] ?? normalCount.value;
 
-      // Update monthly analytics with the same data
-      monthlySlouchy.value = data['i'] ?? monthlySlouchy.value;
-      monthlyLeft.value = data['g'] ?? monthlyLeft.value;
-      monthlyRight.value = data['f'] ?? monthlyRight.value;
-      monthlyNormal.value = data['h'] ?? monthlyNormal.value;
-
       // Recalculate percentages
       _calculatePercentages();
 
@@ -100,9 +94,9 @@ class StateScreenController extends GetxController {
     try {
       print('📥 Fetching sensor history...');
 
-      // Fetch sensor history from API
+      // Fetch latest record only (today summary comes from latest cumulative values)
       final List<Map<String, dynamic>> sensorHistory =
-          await Mongodb.fetchSensorHistory();
+          await Mongodb.fetchSensorHistory(limit: 1);
 
       if (sensorHistory.isEmpty) {
         print('⚠️ No sensor history data available');
@@ -112,8 +106,9 @@ class StateScreenController extends GetxController {
 
       print('✅ Fetched ${sensorHistory.length} records');
 
-      // Process the data
+      // Process latest counters + range summary
       _processSensorHistory(sensorHistory);
+      await _refreshMonthlySummary();
 
       isLoading.value = false;
     } catch (e) {
@@ -143,9 +138,6 @@ class StateScreenController extends GetxController {
     rightCount.value = latestRecord['f'] ?? 0;
     normalCount.value = latestRecord['h'] ?? 0;
 
-    // For monthly analytics, find records within the date range
-    _processMonthlyData(history);
-
     // Calculate percentages for today's summary
     _calculatePercentages();
 
@@ -164,41 +156,24 @@ class StateScreenController extends GetxController {
     );
   }
 
-  /// Process monthly data based on selected date range
-  void _processMonthlyData(List<Map<String, dynamic>> history) {
-    DateTime now = DateTime.now().toUtc();
-    int daysToSubtract = _getDaysForRange(selectedRange.value);
-    DateTime rangeStart = now.subtract(Duration(days: daysToSubtract));
+  /// Refresh monthly chart data using backend range summary.
+  Future<void> _refreshMonthlySummary() async {
+    try {
+      final days = _getDaysForRange(selectedRange.value);
+      final summary = await Mongodb.fetchSensorHistorySummary(days: days);
 
-    // Find the latest record within the date range
-    for (var record in history) {
-      try {
-        String? dateString = record['receivedAt'];
-        if (dateString == null || dateString.isEmpty) continue;
+      monthlySlouchy.value = summary['slouchy'] ?? 0;
+      monthlyLeft.value = summary['left'] ?? 0;
+      monthlyRight.value = summary['right'] ?? 0;
+      monthlyNormal.value = summary['normal'] ?? 0;
 
-        DateTime recordDate = DateTime.parse(dateString);
-
-        // Check if record is within range
-        if (recordDate.isAfter(rangeStart) ||
-            recordDate.isAtSameMomentAs(rangeStart)) {
-          // Use this record for monthly data
-          monthlySlouchy.value = record['i'] ?? 0;
-          monthlyLeft.value = record['g'] ?? 0;
-          monthlyRight.value = record['f'] ?? 0;
-          monthlyNormal.value = record['h'] ?? 0;
-
-          print(
-            '✅ Updated Monthly Data (${_getRangeLabel(selectedRange.value)}):',
-          );
-          print('  - Slouchy: ${monthlySlouchy.value}');
-          print('  - Left: ${monthlyLeft.value}');
-          print('  - Right: ${monthlyRight.value}');
-          print('  - Normal: ${monthlyNormal.value}');
-          break; // We found the latest record in range
-        }
-      } catch (e) {
-        print('⚠️ Error processing monthly record: $e');
-      }
+      print('✅ Updated Monthly Data (${_getRangeLabel(selectedRange.value)}):');
+      print('  - Slouchy: ${monthlySlouchy.value}');
+      print('  - Left: ${monthlyLeft.value}');
+      print('  - Right: ${monthlyRight.value}');
+      print('  - Normal: ${monthlyNormal.value}');
+    } catch (e) {
+      print('❌ Error refreshing monthly summary: $e');
     }
   }
 
@@ -250,7 +225,7 @@ class StateScreenController extends GetxController {
   /// Change date range and refresh data
   void changeRange(DateRange newRange) {
     selectedRange.value = newRange;
-    fetchSensorData();
+    _refreshMonthlySummary();
   }
 
   /// Get total count for monthly analytics

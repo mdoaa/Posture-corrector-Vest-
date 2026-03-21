@@ -354,9 +354,12 @@ class Mongodb {
     };
   }
 
-  /// Fetch sensor history (last 100 records) from backend
+  /// Fetch sensor history from backend with optional range/limit filters.
   /// Returns: List of sensor data maps
-  static Future<List<Map<String, dynamic>>> fetchSensorHistory() async {
+  static Future<List<Map<String, dynamic>>> fetchSensorHistory({
+    int? days,
+    int limit = 100,
+  }) async {
     // Try multiple possible endpoints
     final endpoints = [
       '$baseUrl/sensorHistory',
@@ -366,7 +369,12 @@ class Mongodb {
     ];
 
     for (final endpoint in endpoints) {
-      final url = Uri.parse(endpoint);
+      final queryParameters = <String, String>{'limit': limit.toString()};
+      if (days != null && days > 0) {
+        queryParameters['days'] = days.toString();
+      }
+
+      final url = Uri.parse(endpoint).replace(queryParameters: queryParameters);
       try {
         print('📥 Trying endpoint: $url');
         final response = await http.get(
@@ -416,5 +424,44 @@ class Mongodb {
 
     print('❌ All endpoints failed. No sensor history available.');
     return [];
+  }
+
+  /// Fetch aggregated posture counts for a specific date range.
+  static Future<Map<String, dynamic>> fetchSensorHistorySummary({
+    required int days,
+  }) async {
+    final endpoints = [
+      '$baseUrl/sensorHistory/summary',
+      '$baseUrl/api/sensorHistory/summary',
+      '$baseUrl/api/sensor/history/summary',
+      '$baseUrl/api/sensor/sensorHistory/summary',
+    ];
+
+    for (final endpoint in endpoints) {
+      final url = Uri.parse(
+        endpoint,
+      ).replace(queryParameters: {'days': days.toString()});
+
+      try {
+        print('📥 Trying summary endpoint: $url');
+        final response = await http.get(
+          url,
+          headers: {'Content-Type': 'application/json'},
+        );
+
+        if (response.statusCode == 200) {
+          final dynamic decodedData = jsonDecode(response.body);
+          if (decodedData is Map<String, dynamic>) {
+            return decodedData;
+          }
+        } else if (response.statusCode == 404) {
+          continue;
+        }
+      } catch (e) {
+        print('❌ Error fetching summary from $endpoint: $e');
+      }
+    }
+
+    return {'slouchy': 0, 'left': 0, 'right': 0, 'normal': 0, 'days': days};
   }
 }
