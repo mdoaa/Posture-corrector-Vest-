@@ -267,8 +267,13 @@ void reconnectMQTT() {
 
   if (mqttClient == nullptr) {
     esp_mqtt_client_config_t mqttConfig = {};
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && (ESP_ARDUINO_VERSION_MAJOR >= 3)
+    mqttConfig.broker.address.uri = mqtt_ws_uri;
+    mqttConfig.network.disable_auto_reconnect = false;
+#else
     mqttConfig.uri = mqtt_ws_uri;
     mqttConfig.disable_auto_reconnect = false;
+#endif
 
     mqttClient = esp_mqtt_client_init(&mqttConfig);
     if (mqttClient == nullptr) {
