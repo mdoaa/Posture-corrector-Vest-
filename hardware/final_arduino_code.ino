@@ -143,9 +143,7 @@ char bleNewPassword[65] = "";
 // ==========================================
 // إعدادات الـ MQTT (بدلاً من إعدادات الـ HTTP)
 // ==========================================
-const char* mqtt_ws_uri = "wss://dbaf8b5235624f2385e15c4fd453a600.s1.eu.hivemq.cloud:8884/mqtt";
-const char* mqtt_user = "opop1omar";     
-const char* mqtt_password = "elpop2030aZ##";   
+const char* mqtt_ws_uri = "mqtt://broker.hivemq.com:1883";
 const char* topic_data = "SitGuard/sensor/data/12345";
 const char* topic_control = "SitGuard/device/control/12345";
 
@@ -260,7 +258,7 @@ static void mqttEventHandler(void* handler_args, esp_event_base_t base, int32_t 
   }
 }
 
-// دالة الاتصال بالـ MQTT باليوزر والباسورد
+// دالة الاتصال بالـ MQTT بدون يوزر/باسورد
 void reconnectMQTT() {
   if (!states.wifiConnected) return;
   if (states.mqttConnected) return;
@@ -270,8 +268,6 @@ void reconnectMQTT() {
   if (mqttClient == nullptr) {
     esp_mqtt_client_config_t mqttConfig = {};
     mqttConfig.uri = mqtt_ws_uri;
-    mqttConfig.username = mqtt_user;
-    mqttConfig.password = mqtt_password;
     mqttConfig.disable_auto_reconnect = false;
 
     mqttClient = esp_mqtt_client_init(&mqttConfig);

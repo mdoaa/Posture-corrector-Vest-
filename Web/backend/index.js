@@ -40,19 +40,14 @@ const io = new Server(server, {
 });
 
 // ==========================================
-// إعدادات الـ MQTT المحمي (HiveMQ Cloud 24/7)
+// إعدادات MQTT على broker HiveMQ العام (بدون يوزر/باسورد)
 // ==========================================
-const MQTT_BROKER = "wss://dbaf8b5235624f2385e15c4fd453a600.s1.eu.hivemq.cloud:8884/mqtt";
+const MQTT_BROKER = "mqtt://broker.hivemq.com:1883";
 const MQTT_TOPIC_DATA = "SitGuard/sensor/data/12345";
 const MQTT_TOPIC_CONTROL = "SitGuard/device/control/12345";
 const MQTT_TOPIC_LOGS = "SitGuard/backend/logs/12345";
 
-const mqttOptions = {
-  username: "opop1omar",
-  password: "elpop2030aZ##"
-};
-
-const mqttClient = mqtt.connect(MQTT_BROKER, mqttOptions);
+const mqttClient = mqtt.connect(MQTT_BROKER);
 
 const publishMqttLog = (event, details = {}) => {
   const logPayload = {
@@ -68,7 +63,7 @@ const publishMqttLog = (event, details = {}) => {
 };
 
 mqttClient.on("connect", () => {
-  console.log("Connected to Secure HiveMQ Cloud ✅");
+  console.log("Connected to HiveMQ public broker ✅");
   mqttClient.subscribe(MQTT_TOPIC_DATA, (err) => {
     if (!err) {
       console.log(`Subscribed to MQTT Topic: ${MQTT_TOPIC_DATA}`);
