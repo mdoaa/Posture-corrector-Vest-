@@ -8,6 +8,7 @@ enum DateRange { last7, last14, last30 }
 
 class StateScreenController extends GetxController {
   late IO.Socket socket;
+  static const Duration _summaryCacheTtl = Duration(seconds: 30);
 
   // Today's Summary Data
   RxInt slouchyCount = 0.obs;
@@ -29,6 +30,8 @@ class StateScreenController extends GetxController {
 
   RxBool isLoading = true.obs;
   Timer? _refreshTimer;
+  final Map<DateRange, Map<String, int>> _rangeSummaryCache = {};
+  final Map<DateRange, DateTime> _rangeSummaryFetchedAt = {};
 
   @override
   void onInit() {
@@ -108,7 +111,8 @@ class StateScreenController extends GetxController {
 
       // Process latest counters + range summary
       _processSensorHistory(sensorHistory);
-      await _refreshMonthlySummary();
+      await _refreshMonthlySummary(forceRefresh: true);
+      _preloadOtherRanges();
 
       isLoading.value = false;
     } catch (e) {
@@ -157,23 +161,144 @@ class StateScreenController extends GetxController {
   }
 
   /// Refresh monthly chart data using backend range summary.
-  Future<void> _refreshMonthlySummary() async {
+  Future<void> _refreshMonthlySummary({
+    bool forceRefresh = false,
+    DateRange? targetRange,
+  }) async {
     try {
-      final days = _getDaysForRange(selectedRange.value);
+      final currentRange = targetRange ?? selectedRange.value;
+
+      if (!forceRefresh && _isRangeCacheFresh(currentRange)) {
+        _applyMonthlyValues(_rangeSummaryCache[currentRange]!);
+        return;
+      }
+
+      final days = _getDaysForRange(currentRange);
       final summary = await Mongodb.fetchSensorHistorySummary(days: days);
 
-      monthlySlouchy.value = summary['slouchy'] ?? 0;
-      monthlyLeft.value = summary['left'] ?? 0;
-      monthlyRight.value = summary['right'] ?? 0;
-      monthlyNormal.value = summary['normal'] ?? 0;
+      int slouchy = _toInt(summary['slouchy']);
+      int left = _toInt(summary['left']);
+      int right = _toInt(summary['right']);
+      int normal = _toInt(summary['normal']);
 
-      print('✅ Updated Monthly Data (${_getRangeLabel(selectedRange.value)}):');
+      // Fallback: if backend summary endpoint is unavailable or returns zeros,
+      // derive range totals directly from history records.
+      if (slouchy + left + right + normal == 0) {
+        final fallback = await _calculateSummaryFromHistory(days);
+        slouchy = fallback['slouchy'] ?? 0;
+        left = fallback['left'] ?? 0;
+        right = fallback['right'] ?? 0;
+        normal = fallback['normal'] ?? 0;
+      }
+
+      final values = {
+        'slouchy': slouchy,
+        'left': left,
+        'right': right,
+        'normal': normal,
+      };
+
+      _rangeSummaryCache[currentRange] = values;
+      _rangeSummaryFetchedAt[currentRange] = DateTime.now();
+
+      if (currentRange == selectedRange.value) {
+        _applyMonthlyValues(values);
+      }
+
+      print('✅ Updated Monthly Data (${_getRangeLabel(currentRange)}):');
       print('  - Slouchy: ${monthlySlouchy.value}');
       print('  - Left: ${monthlyLeft.value}');
       print('  - Right: ${monthlyRight.value}');
       print('  - Normal: ${monthlyNormal.value}');
     } catch (e) {
       print('❌ Error refreshing monthly summary: $e');
+    }
+  }
+
+  bool _isRangeCacheFresh(DateRange range) {
+    final fetchedAt = _rangeSummaryFetchedAt[range];
+    if (fetchedAt == null) return false;
+    return DateTime.now().difference(fetchedAt) <= _summaryCacheTtl;
+  }
+
+  void _applyMonthlyValues(Map<String, int> values) {
+    monthlySlouchy.value = values['slouchy'] ?? 0;
+    monthlyLeft.value = values['left'] ?? 0;
+    monthlyRight.value = values['right'] ?? 0;
+    monthlyNormal.value = values['normal'] ?? 0;
+  }
+
+  Future<void> _preloadOtherRanges() async {
+    final ranges = [DateRange.last7, DateRange.last14, DateRange.last30];
+    for (final range in ranges) {
+      if (_isRangeCacheFresh(range)) continue;
+      await _refreshMonthlySummary(forceRefresh: true, targetRange: range);
+    }
+
+    if (_rangeSummaryCache.containsKey(selectedRange.value)) {
+      _applyMonthlyValues(_rangeSummaryCache[selectedRange.value]!);
+    }
+  }
+
+  int _toInt(dynamic value) {
+    if (value is int) return value;
+    if (value is double) return value.toInt();
+    return int.tryParse(value?.toString() ?? '') ?? 0;
+  }
+
+  Future<Map<String, int>> _calculateSummaryFromHistory(int days) async {
+    try {
+      final history = await Mongodb.fetchSensorHistory(
+        days: days,
+        limit: 500000,
+      );
+      if (history.isEmpty) {
+        return {'slouchy': 0, 'left': 0, 'right': 0, 'normal': 0};
+      }
+
+      final latest = history.first;
+      final now = DateTime.now().toUtc();
+      final rangeStart = now.subtract(Duration(days: days));
+
+      Map<String, dynamic>? baseline;
+      for (final record in history) {
+        final dateString = record['receivedAt']?.toString();
+        if (dateString == null || dateString.isEmpty) continue;
+
+        final recordDate = DateTime.tryParse(dateString)?.toUtc();
+        if (recordDate == null) continue;
+
+        if (recordDate.isBefore(rangeStart)) {
+          baseline = record;
+          break;
+        }
+      }
+
+      baseline ??= history.length > 1 ? history.last : null;
+
+      final latestSlouchy = _toInt(latest['i']);
+      final latestLeft = _toInt(latest['g']);
+      final latestRight = _toInt(latest['f']);
+      final latestNormal = _toInt(latest['h']);
+
+      if (baseline == null) {
+        return {
+          'slouchy': latestSlouchy,
+          'left': latestLeft,
+          'right': latestRight,
+          'normal': latestNormal,
+        };
+      }
+
+      return {
+        'slouchy': (latestSlouchy - _toInt(baseline['i'])).clamp(0, 1 << 30),
+        'left': (latestLeft - _toInt(baseline['g'])).clamp(0, 1 << 30),
+        'right': (latestRight - _toInt(baseline['f'])).clamp(0, 1 << 30),
+        'normal': (latestNormal - _toInt(baseline['h'])).clamp(0, 1 << 30),
+      };
+    } catch (e) {
+      print('❌ Error calculating fallback summary from history: $e');
+      return {'slouchy': 0, 'left': 0, 'right': 0, 'normal': 0};
     }
   }
 
@@ -225,7 +350,14 @@ class StateScreenController extends GetxController {
   /// Change date range and refresh data
   void changeRange(DateRange newRange) {
     selectedRange.value = newRange;
-    _refreshMonthlySummary();
+
+    if (_rangeSummaryCache.containsKey(newRange)) {
+      _applyMonthlyValues(_rangeSummaryCache[newRange]!);
+      _refreshMonthlySummary();
+      return;
+    }
+
+    _refreshMonthlySummary(forceRefresh: true);
   }
 
   /// Get total count for monthly analytics
