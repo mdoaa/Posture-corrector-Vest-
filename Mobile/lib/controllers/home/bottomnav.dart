@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:sitguard/screens/home/chatbot_screen.dart';
 import 'package:sitguard/screens/home/home_screen.dart';
 import 'package:sitguard/screens/home/state_screen.dart';
 import 'package:sitguard/screens/home/settings_screen.dart';
@@ -16,6 +17,7 @@ class BottomNavController extends GetxController {
     // Center(child: Text("Support")),
     HomeScreenPage(),
     StateScreenPage(),
+    ChatbotScreen(),
     SettingsScreen(),
   ];
   Widget get currentPage => pages[curIndex.value];

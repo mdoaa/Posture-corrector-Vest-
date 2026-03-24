@@ -19,6 +19,8 @@ class Home extends StatelessWidget {
     return Scaffold(
       bottomNavigationBar: Obx(
         () => BottomNavigationBar(
+          type: BottomNavigationBarType.fixed,
+          showUnselectedLabels: true,
           backgroundColor: Theme.of(context).scaffoldBackgroundColor,
           selectedItemColor: Colors.blueGrey[300],
           currentIndex: bottomNavController.curIndex.value,
@@ -26,6 +28,7 @@ class Home extends StatelessWidget {
           items: [
             BottomNavigationBarItem(icon: Icon(Icons.home), label: "Home"),
             BottomNavigationBarItem(icon: Icon(Icons.insights), label: "State"),
+            BottomNavigationBarItem(icon: Icon(Icons.chat_bubble), label: "Chat"),
             BottomNavigationBarItem(
               icon: Icon(Icons.settings),
               label: "Settings",

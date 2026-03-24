@@ -8,6 +8,11 @@ import mongoose from "mongoose";
 
 const router = express.Router();
 
+const smtpPort = Number(process.env.SMTP_PORT || 587);
+const smtpSecure = String(process.env.SMTP_SECURE || "false").toLowerCase() === "true";
+const smtpRejectUnauthorized =
+  String(process.env.SMTP_REJECT_UNAUTHORIZED || "false").toLowerCase() === "true";
+
 router.post("/add", async (req, res) => {
   const { guestId, userId, productId } = req.body;
   if (userId) {
@@ -126,15 +131,15 @@ router.post("/confirm", async (req, res) => {
 
     console.log("Creating transporter...");
     const transporter = nodemailer.createTransport({
-      host: "smtp.gmail.com",
-      port: 587,
-      secure: false,
+      host: process.env.SMTP_HOST,
+      port: smtpPort,
+      secure: smtpSecure,
       auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS,
       },
       tls: {
-        rejectUnauthorized: false,
+        rejectUnauthorized: smtpRejectUnauthorized,
       },
     });
 
@@ -173,7 +178,7 @@ SitX Team
 
     console.log("Sending email to", email);
     const info = await transporter.sendMail({
-      from: `"SitX" <${process.env.SMTP_USER}>`,
+      from: `"SitX" <${process.env.SMTP_SENDER || process.env.SMTP_USER}>`,
       to: email,
       subject: "Order Confirmation - SitX",
       text: emailText,

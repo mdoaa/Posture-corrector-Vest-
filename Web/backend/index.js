@@ -13,6 +13,7 @@ import passport from "passport";
 import "./config/passport.js";
 import googleAuthRouter from "./routes/googleAuth.js";
 import getSensorRoutes from "./routes/sensor.js";
+import postureCoachRouter from "./routes/postureCoach.js";
 import path from "path";
 import { fileURLToPath } from "url";
 import { Server } from "socket.io";
@@ -27,13 +28,20 @@ const app = express();
 app.use(express.json());
 const port = process.env.PORT || 8080;
 const server = http.createServer(app);
-const allowedOrigins = [
-  "https://sitxnew.vercel.app",
-];
+const parseCsvEnv = (value) =>
+  String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+const allowedOrigins = parseCsvEnv(process.env.ALLOWED_ORIGINS);
+const socketAllowedOrigins = parseCsvEnv(process.env.SOCKET_ALLOWED_ORIGINS);
+const resolvedSocketOrigins =
+  socketAllowedOrigins.length > 0 ? socketAllowedOrigins : allowedOrigins;
 
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigins,
+    origin: resolvedSocketOrigins.length > 0 ? resolvedSocketOrigins : true,
     methods: ["GET", "POST"],
     credentials: true,
   },
@@ -42,12 +50,19 @@ const io = new Server(server, {
 // ==========================================
 // إعدادات MQTT على broker HiveMQ العام (بدون يوزر/باسورد)
 // ==========================================
-const MQTT_BROKER = "mqtt://broker.hivemq.com:1883";
-const MQTT_TOPIC_DATA = "SitGuard/sensor/data/12345";
-const MQTT_TOPIC_CONTROL = "SitGuard/device/control/12345";
-const MQTT_TOPIC_LOGS = "SitGuard/backend/logs/12345";
+const MQTT_BROKER = process.env.MQTT_BROKER || "mqtt://broker.hivemq.com:1883";
+const MQTT_TOPIC_DATA = process.env.MQTT_TOPIC_DATA || "SitGuard/sensor/data/12345";
+const MQTT_TOPIC_CONTROL =
+  process.env.MQTT_TOPIC_CONTROL || "SitGuard/device/control/12345";
+const MQTT_TOPIC_LOGS = process.env.MQTT_TOPIC_LOGS || "SitGuard/backend/logs/12345";
 
-const mqttClient = mqtt.connect(MQTT_BROKER);
+const mqttConnectOptions = {
+  username: process.env.MQTT_USERNAME || undefined,
+  password: process.env.MQTT_PASSWORD || undefined,
+  clientId: process.env.MQTT_CLIENT_ID || undefined,
+};
+
+const mqttClient = mqtt.connect(MQTT_BROKER, mqttConnectOptions);
 
 const publishMqttLog = (event, details = {}) => {
   const logPayload = {
@@ -306,6 +321,7 @@ app.use("/", cartRoutes);
 app.use("/", adminRoutes);
 // app.use('/', sensorRoutes);
 app.use("/", getSensorRoutes(io));
+app.use("/", postureCoachRouter);
 
 app.get("/protected", authMiddleWare, (req, res) => {
   res.json({ message: "This is a protected route", userId: req.user });

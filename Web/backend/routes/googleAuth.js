@@ -7,6 +7,8 @@ dotenv.config();
 
 
 const router = express.Router();
+const frontendSuccessBaseUrl =
+  (process.env.FRONTEND_SUCCESS_URL || "http://localhost:3000").replace(/\/$/, "");
 
 router.get('/google', passport.authenticate('google', {
     scope: ['profile', 'email']
@@ -35,7 +37,7 @@ router.get('/google', passport.authenticate('google', {
         role: req.user.role
       }));
   
-      res.redirect(`http://localhost:3000/google-success?user=${userInfo}`);
+      res.redirect(`${frontendSuccessBaseUrl}/google-success?user=${userInfo}`);
     }
   );
   

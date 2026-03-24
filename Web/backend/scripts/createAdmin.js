@@ -10,12 +10,18 @@ const __dirname = path.dirname(__filename);
 
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
-console.log('MONGOURI =>', process.env.MONGOURI); // Debug line
-
+const adminSeedEmail = process.env.ADMIN_SEED_EMAIL;
+const adminSeedPassword = process.env.ADMIN_SEED_PASSWORD;
+const adminSeedUsername = process.env.ADMIN_SEED_USERNAME || 'admin';
 
 
 const createAdmin = async () => {
   try {
+    if (!adminSeedEmail || !adminSeedPassword) {
+      console.error('❌ Missing ADMIN_SEED_EMAIL or ADMIN_SEED_PASSWORD in environment');
+      process.exit(1);
+    }
+
     await  mongoose.connect(process.env.MONGOURI, {
         useNewUrlParser: true,
         useUnifiedTopology: true,
@@ -23,15 +29,16 @@ const createAdmin = async () => {
         .catch((err) => console.log('error in connection to mongodb', err));
 
 
-    const existingAdmin = await User.findOne({ email: 'admin@gmail.com' });
+    const existingAdmin = await User.findOne({ email: adminSeedEmail });
     if (existingAdmin) {
       console.log('✅ Admin already exists');
       return process.exit();
     }
+
     const admin = new User({
-      username: 'admin',
-      email: 'graduationmi2025@gmail.com',
-      password: 'Admingraduationmi2025@grad',
+      username: adminSeedUsername,
+      email: adminSeedEmail,
+      password: adminSeedPassword,
       role: 'admin', 
     });
 
