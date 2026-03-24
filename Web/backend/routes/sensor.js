@@ -4,6 +4,98 @@ import SitxHistory from '../models/sensorHistory.js';
 
 // const router = express.Router();
 
+const WINDOW_DEFINITIONS = [
+    { key: 'today', days: 1 },
+    { key: 'week', days: 7 },
+    { key: 'twoWeeks', days: 14 },
+    { key: 'month', days: 30 },
+    { key: 'sixMonths', days: 180 },
+    { key: 'year', days: 365 },
+];
+
+const toNumber = (value) => Number(value || 0);
+
+const toIsoOrNull = (value) => {
+    if (!value) return null;
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date.toISOString();
+};
+
+const buildWindowAggregate = async (days) => {
+    const now = new Date();
+    const rangeStart = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+
+    const [latestInRange, baselineBeforeRange, rangeRecords] = await Promise.all([
+        SitxHistory.findOne({ receivedAt: { $gte: rangeStart } }).sort({ receivedAt: -1 }).lean(),
+        SitxHistory.findOne({ receivedAt: { $lt: rangeStart } }).sort({ receivedAt: -1 }).lean(),
+        SitxHistory.find(
+            { receivedAt: { $gte: rangeStart } },
+            { a: 1, b: 1, c: 1, receivedAt: 1 }
+        ).sort({ receivedAt: 1 }).lean(),
+    ]);
+
+    if (!latestInRange) {
+        return {
+            days,
+            from: rangeStart.toISOString(),
+            to: now.toISOString(),
+            latestAt: null,
+            recordsInRange: 0,
+            normalCount: 0,
+            slouchyCount: 0,
+            vibrationOpenedCount: 0,
+            airChamberOpenedCount: 0,
+            valveOpenedCount: 0,
+        };
+    }
+
+    const normalCount = Math.max(0, toNumber(latestInRange.h) - toNumber(baselineBeforeRange?.h));
+    const slouchyCount = Math.max(0, toNumber(latestInRange.i) - toNumber(baselineBeforeRange?.i));
+
+    let vibrationOpenedCount = 0;
+    let airChamberOpenedCount = 0;
+    let valveOpenedCount = 0;
+
+    let prevVibrationEnabled = Boolean(baselineBeforeRange?.c);
+    let prevPumpRunning = Boolean(baselineBeforeRange?.b);
+    let prevValveOpen = Boolean(baselineBeforeRange?.a);
+
+    for (const record of rangeRecords) {
+        const currentVibrationEnabled = Boolean(record?.c);
+        const currentPumpRunning = Boolean(record?.b);
+        const currentValveOpen = Boolean(record?.a);
+
+        if (currentVibrationEnabled && !prevVibrationEnabled) {
+            vibrationOpenedCount += 1;
+        }
+
+        if (currentPumpRunning && !prevPumpRunning) {
+            airChamberOpenedCount += 1;
+        }
+
+        if (currentValveOpen && !prevValveOpen) {
+            valveOpenedCount += 1;
+        }
+
+        prevVibrationEnabled = currentVibrationEnabled;
+        prevPumpRunning = currentPumpRunning;
+        prevValveOpen = currentValveOpen;
+    }
+
+    return {
+        days,
+        from: rangeStart.toISOString(),
+        to: now.toISOString(),
+        latestAt: toIsoOrNull(latestInRange.receivedAt),
+        recordsInRange: rangeRecords.length,
+        normalCount,
+        slouchyCount,
+        vibrationOpenedCount,
+        airChamberOpenedCount,
+        valveOpenedCount,
+    };
+};
+
 const getSensorRoutes = (io) => {
     const router = express.Router();
 
@@ -78,6 +170,25 @@ router.get('/sensorHistory/summary', async (req, res) => {
     } catch (err) {
         console.error('Error fetching sensor history summary:', err);
         res.status(500).json({ error: 'error fetching sensor history summary from database' });
+    }
+});
+
+router.get('/sensorHistory/aggregated', async (req, res) => {
+    try {
+        const windows = await Promise.all(
+            WINDOW_DEFINITIONS.map(async (windowDef) => {
+                const summary = await buildWindowAggregate(windowDef.days);
+                return [windowDef.key, summary];
+            })
+        );
+
+        return res.status(200).json({
+            generatedAt: new Date().toISOString(),
+            metrics: Object.fromEntries(windows),
+        });
+    } catch (err) {
+        console.error('Error fetching aggregated sensor history:', err);
+        return res.status(500).json({ error: 'error fetching aggregated sensor history from database' });
     }
 });
 
