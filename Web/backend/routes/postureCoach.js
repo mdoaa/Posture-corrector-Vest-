@@ -3,7 +3,9 @@ import SitxHistory from "../models/sensorHistory.js";
 
 const router = express.Router();
 
-const DEFAULT_MODEL = process.env.XAI_MODEL || "grok-4-1-fast";
+const AI_PROVIDER = (process.env.AI_PROVIDER || "groq").toLowerCase();
+const DEFAULT_XAI_MODEL = process.env.XAI_MODEL || "grok-4-1-fast";
+const DEFAULT_GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.1-8b-instant";
 const MAX_MESSAGE_LENGTH = 700;
 const MAX_HISTORY_ITEMS = 12;
 const RATE_WINDOW_MS = 60 * 1000;
@@ -173,8 +175,26 @@ const sanitizeModelResponse = (value) => {
   };
 };
 
-const generateCoachReply = async (apiKey, payload) => {
-  const model = sanitizeText(process.env.XAI_MODEL, 80) || DEFAULT_MODEL;
+const resolveAiConfig = () => {
+  if (AI_PROVIDER === "groq") {
+    return {
+      provider: "groq",
+      apiKey: sanitizeText(process.env.GROQ_API_KEY, 400),
+      model: sanitizeText(process.env.GROQ_MODEL, 120) || DEFAULT_GROQ_MODEL,
+      endpoint: "https://api.groq.com/openai/v1/chat/completions",
+    };
+  }
+
+  return {
+    provider: "xai",
+    apiKey: sanitizeText(process.env.XAI_API_KEY, 400),
+    model: sanitizeText(process.env.XAI_MODEL, 120) || DEFAULT_XAI_MODEL,
+    endpoint: "https://api.x.ai/v1/chat/completions",
+  };
+};
+
+const generateCoachReply = async (aiConfig, payload) => {
+  const { apiKey, model, endpoint } = aiConfig;
 
   const requestBody = {
     model,
@@ -185,8 +205,6 @@ const generateCoachReply = async (apiKey, payload) => {
       { role: "user", content: JSON.stringify(payload) },
     ],
   };
-
-  const endpoint = "https://api.x.ai/v1/chat/completions";
 
   const response = await fetch(endpoint, {
     method: "POST",
@@ -199,7 +217,7 @@ const generateCoachReply = async (apiKey, payload) => {
 
   if (!response.ok) {
     const responseText = await response.text();
-    throw new Error(`xAI request failed (${response.status}): ${responseText.slice(0, 300)}`);
+    throw new Error(`AI request failed (${response.status}): ${responseText.slice(0, 300)}`);
   }
 
   const data = await response.json();
@@ -214,11 +232,12 @@ const generateCoachReply = async (apiKey, payload) => {
 };
 
 router.get("/api/posture-coach/health", (req, res) => {
-  const hasApiKey = Boolean(process.env.XAI_API_KEY);
+  const aiConfig = resolveAiConfig();
+  const hasApiKey = Boolean(aiConfig.apiKey);
   res.status(200).json({
     ok: true,
-    provider: "xai",
-    model: process.env.XAI_MODEL || DEFAULT_MODEL,
+    provider: aiConfig.provider,
+    model: aiConfig.model,
     configured: hasApiKey,
   });
 });
@@ -296,19 +315,19 @@ router.post("/api/posture-coach/chat", async (req, res) => {
     objective: "coach user on safer daily posture habits using the smart jacket features",
   };
 
-  const apiKey = process.env.XAI_API_KEY;
+  const aiConfig = resolveAiConfig();
 
   // No API Key? Return an HTTP 503 instead of a fallback text.
-  if (!apiKey) {
-    console.error("API Error: Missing xAI API Key");
+  if (!aiConfig.apiKey) {
+    console.error(`API Error: Missing ${aiConfig.provider} API Key`);
     return res.status(503).json({
       error: "AI_UNAVAILABLE",
-      details: "The posture coach is not configured on the server."
+      details: `The posture coach is not configured on the server (${aiConfig.provider} key missing).`
     });
   }
 
   try {
-    const modelResponse = await generateCoachReply(apiKey, payload);
+    const modelResponse = await generateCoachReply(aiConfig, payload);
     const coach = sanitizeModelResponse(modelResponse);
 
     // Final safety check on AI output
@@ -322,8 +341,8 @@ router.post("/api/posture-coach/chat", async (req, res) => {
     }
 
     return res.status(200).json({
-      source: "xai",
-      model: process.env.XAI_MODEL || DEFAULT_MODEL,
+      source: aiConfig.provider,
+      model: aiConfig.model,
       coach,
       medicalNotice: "This assistant supports posture wellness and education only, not diagnosis or treatment.",
     });
