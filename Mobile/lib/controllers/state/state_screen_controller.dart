@@ -124,7 +124,7 @@ class StateScreenController extends GetxController {
     monthlySlouchy.value = slouchy;
     monthlyVibration.value = vibrationSec;
 
-    final total = normal + slouchy + vibrationSec;
+    final total = normal + slouchy;
     if (total <= 0) {
       todayNormalPercent.value = 0;
       todaySlouchyPercent.value = 0;
