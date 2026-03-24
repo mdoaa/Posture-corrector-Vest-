@@ -78,7 +78,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
 
     try {
       final response = await http.post(
-        Uri.parse('${AppConfig.apiBaseUrl}/api/posture-coach/chat'),
+        Uri.parse('${AppConfig.prodBaseUrl}/api/posture-coach/chat'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode(payload),
       );

@@ -9,7 +9,7 @@ class Mongodb {
   String email;
   String password;
 
-  static const String baseUrl = AppConfig.apiBaseUrl;
+  static const String baseUrl = AppConfig.prodBaseUrl;
 
   // static const String baseUrl = 'http://192.168.100.165:8080';
   // static const String baseUrl =
@@ -354,126 +354,48 @@ class Mongodb {
     };
   }
 
-  /// Fetch sensor history from backend with optional range/limit filters.
-  /// Returns: List of sensor data maps
-  static Future<List<Map<String, dynamic>>> fetchSensorHistory({
-    int? days,
-    int limit = 100,
-  }) async {
-    // Try multiple possible endpoints
+  /// Fetch latest sensor snapshot from backend sensorData endpoint.
+  /// Returns a single record map, or empty map when unavailable.
+  static Future<Map<String, dynamic>> fetchLatestSensorData() async {
     final endpoints = [
-      '$baseUrl/sensorHistory',
-      '$baseUrl/api/sensorHistory',
-      '$baseUrl/api/sensor/history',
-      '$baseUrl/api/sensor/sensorHistory',
+      '$baseUrl/sensorData',
+      '$baseUrl/api/sensorData',
+      '$baseUrl/api/sensor/data',
+      '$baseUrl/api/sensor/latest',
     ];
 
     for (final endpoint in endpoints) {
-      final queryParameters = <String, String>{'limit': limit.toString()};
-      if (days != null && days > 0) {
-        queryParameters['days'] = days.toString();
-      }
-
-      final url = Uri.parse(endpoint).replace(queryParameters: queryParameters);
       try {
-        print('📥 Trying endpoint: $url');
         final response = await http.get(
-          url,
+          Uri.parse(endpoint),
           headers: {'Content-Type': 'application/json'},
         );
 
-        print('📥 Response status: ${response.statusCode}');
-
-        if (response.statusCode == 200) {
-          final dynamic decodedData = jsonDecode(response.body);
-
-          // Handle different response structures
-          List<dynamic> data;
-          if (decodedData is List) {
-            data = decodedData;
-          } else if (decodedData is Map && decodedData.containsKey('data')) {
-            data = decodedData['data'] as List<dynamic>;
-          } else if (decodedData is Map && decodedData.containsKey('history')) {
-            data = decodedData['history'] as List<dynamic>;
-          } else {
-            print(
-              '⚠️ Unexpected response structure: ${decodedData.runtimeType}',
-            );
-            continue; // Try next endpoint
-          }
-
-          print(
-            '✅ Sensor history fetched from $endpoint: ${data.length} records',
-          );
-          if (data.isNotEmpty) {
-            print('📊 Sample record keys: ${(data[0] as Map).keys.toList()}');
-          }
-          return data.cast<Map<String, dynamic>>();
-        } else if (response.statusCode == 404) {
-          print('⚠️ Endpoint not found (404): $endpoint');
-          continue; // Try next endpoint
-        } else {
-          print('❌ Failed with status ${response.statusCode}: $endpoint');
-          continue; // Try next endpoint
-        }
-      } catch (e) {
-        print('❌ Error fetching from $endpoint: $e');
-        continue; // Try next endpoint
-      }
-    }
-
-    print('❌ All endpoints failed. No sensor history available.');
-    return [];
-  }
-
-  /// Fetch aggregated posture counts for a specific date range.
-  static Future<Map<String, dynamic>> fetchSensorHistorySummary({
-    required int days,
-  }) async {
-    final endpoints = [
-      '$baseUrl/sensorHistory/summary',
-      '$baseUrl/api/sensorHistory/summary',
-      '$baseUrl/api/sensor/history/summary',
-      '$baseUrl/api/sensor/sensorHistory/summary',
-    ];
-
-    for (final endpoint in endpoints) {
-      final url = Uri.parse(
-        endpoint,
-      ).replace(queryParameters: {'days': days.toString()});
-
-      try {
-        print('📥 Trying summary endpoint: $url');
-        final response = await http.get(
-          url,
-          headers: {'Content-Type': 'application/json'},
-        );
-
-        if (response.statusCode == 200) {
-          final dynamic decodedData = jsonDecode(response.body);
-          if (decodedData is Map<String, dynamic>) {
-            return decodedData;
-          }
-        } else if (response.statusCode == 404) {
+        if (response.statusCode != 200) {
+          if (response.statusCode == 404) continue;
           continue;
         }
+
+        final dynamic decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic>) {
+          return decoded;
+        }
       } catch (e) {
-        print('❌ Error fetching summary from $endpoint: $e');
+        print('❌ Error fetching latest sensor data from $endpoint: $e');
       }
     }
 
-    return {'slouchy': 0, 'left': 0, 'right': 0, 'normal': 0, 'days': days};
+    return {};
   }
 
-  /// Fetch today's aggregated metrics from /sensorHistory/aggregated.
+  /// Fetch today's aggregated metrics from /sensor/aggregated.
   /// Returns keys: normalCount, slouchyCount,
   /// vibrationActiveDurationSec, airChamberActiveDurationSec.
   static Future<Map<String, int>> fetchTodayAggregatedWindow() async {
     final endpoints = [
-      '$baseUrl/sensorHistory/aggregated',
-      '$baseUrl/api/sensorHistory/aggregated',
-      '$baseUrl/api/sensor/history/aggregated',
-      '$baseUrl/api/sensor/sensorHistory/aggregated',
+      '$baseUrl/sensor/aggregated',
+      '$baseUrl/api/sensor/aggregated',
+      '$baseUrl/api/sensor/data/aggregated',
     ];
 
     for (final endpoint in endpoints) {
@@ -536,14 +458,13 @@ class Mongodb {
     };
   }
 
-  /// Fetch all aggregated windows from /sensorHistory/aggregated.
+  /// Fetch all aggregated windows from /sensor/aggregated.
   /// Returns a map keyed by: today, week, twoWeeks, month, sixMonths, year.
   static Future<Map<String, Map<String, int>>> fetchAggregatedMetrics() async {
     final endpoints = [
-      '$baseUrl/sensorHistory/aggregated',
-      '$baseUrl/api/sensorHistory/aggregated',
-      '$baseUrl/api/sensor/history/aggregated',
-      '$baseUrl/api/sensor/sensorHistory/aggregated',
+      '$baseUrl/sensor/aggregated',
+      '$baseUrl/api/sensor/aggregated',
+      '$baseUrl/api/sensor/data/aggregated',
     ];
 
     int parseInt(dynamic value) {

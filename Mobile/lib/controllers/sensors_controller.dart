@@ -9,7 +9,7 @@ enum DateRange { last7, last14, last18, last28 }
 class Sensors extends GetxController {
   late IO.Socket socket;
   Timer? _midnightResetTimer;
-  Timer? _historyFetchTimer;
+  Timer? _sensorDataFetchTimer;
 
   RxInt sCount = 5.obs;
   RxInt rCount = 0.obs;
@@ -116,61 +116,11 @@ class Sensors extends GetxController {
       print('🟢 Connected to WebSocket');
     });
 
-    socket.on('sensorHistoryData', (data) {
+    socket.on('sensorData', (data) {
       print('📥 Received data: $data');
-      int slouchycount = data['i'] ?? 0;
-      int lsideCounter = data['g'] ?? 0;
-      int rsideCounter = data['f'] ?? 0;
-      int normal = data['h'] ?? 0;
-
-      int totalcounts = data['j'] ?? 0;
-      int totalmin = data['l'] ?? 0;
-
-      int snormal = data['n'] ?? 0;
-      int smild = data['o'] ?? 0;
-      int smoderate = data['k'] ?? 0;
-      int sSevere = data['p'] ?? 0;
-
-      int rnormal = data['q'] ?? 0;
-      int rmoderate = data['r'] ?? 0;
-      int rsevere = data['s'] ?? 0;
-
-      int lnormal = data['t'] ?? 0;
-      int lmoderate = data['u'] ?? 0;
-      int lsevere = data['v'] ?? 0;
-
-      int slouchypercent = data['zzz'] ?? 0;
-      int rightpercent = data['z'] ?? 0;
-      int leftpercent = data['zz'] ?? 0;
-
-      totalIncorrect.value = slouchycount + lsideCounter + rsideCounter;
-      // total.value = slouchycount + lsideCounter + rsideCounter + normal;
-      totalcount.value = totalcounts;
-      totaltime.value = totalmin;
-      normalcount.value = normal;
-      sCount.value = slouchycount;
-      rCount.value = rsideCounter;
-      lCount.value = lsideCounter;
-
-      pnormal.value = snormal;
-      pmild.value = smild;
-      pmoderate.value = smoderate;
-      psevere.value = sSevere;
-
-      rNormal.value = rnormal;
-      rModerate.value = rmoderate;
-      rSevere.value = rsevere;
-
-      lNormal.value = lnormal;
-      lModerate.value = lmoderate;
-      lSevere.value = lsevere;
-
-      slouchyPercent.value = slouchypercent.toDouble();
-      rightPercent.value = rightpercent.toDouble();
-      leftPercent.value = leftpercent.toDouble();
-
-      // Update today's summary on every data receive
-      _fetchTodayData();
+      if (data is Map) {
+        _updateWithLatestData(Map<String, dynamic>.from(data));
+      }
     });
 
     socket.onDisconnect((_) {
@@ -180,49 +130,37 @@ class Sensors extends GetxController {
     // Setup midnight reset
     _setupMidnightReset();
 
-    // Fetch today's aggregated data on connection
-    _fetchTodayData();
-
-    // Start periodic sensor history fetching for analytics
-    _startHistoryFetching();
+    // Fetch latest snapshot and keep it refreshed from sensorData endpoint.
+    _startSensorDataFetching();
   }
 
-  /// Start periodic fetching of sensor history for weekly/monthly analytics
-  void _startHistoryFetching() {
-    // Fetch immediately on start
-    _fetchAndProcessHistory();
+  /// Start periodic fetching of the latest sensor snapshot.
+  void _startSensorDataFetching() {
+    _fetchAndProcessLatestSensorData();
 
-    // Then fetch every 30 seconds for real-time updates
-    _historyFetchTimer = Timer.periodic(Duration(seconds: 30), (_) {
-      _fetchAndProcessHistory();
+    _sensorDataFetchTimer = Timer.periodic(Duration(seconds: 10), (_) {
+      _fetchAndProcessLatestSensorData();
     });
 
-    print('⏰ Started periodic history fetching (every 30s)');
+    print('⏰ Started periodic sensorData fetching (every 10s)');
   }
 
-  /// Fetch sensor history and update analytics
-  Future<void> _fetchAndProcessHistory() async {
+  /// Fetch latest sensorData and update home stats.
+  Future<void> _fetchAndProcessLatestSensorData() async {
     try {
-      final history = await Mongodb.fetchSensorHistory();
+      final latest = await Mongodb.fetchLatestSensorData();
 
-      if (history.isEmpty) {
-        print('⚠️ No history data available');
+      if (latest.isEmpty) {
+        print('⚠️ No sensorData available');
         return;
       }
 
-      // Process the latest record for current stats
-      final latest = history.first;
+      // Process latest snapshot for current stats
       _updateWithLatestData(latest);
 
-      // Calculate weekly data
-      _calculateWeeklyData(history);
-
-      // Calculate monthly data for all ranges
-      _calculateMonthlyData(history);
-
-      print('✅ History data processed and UI updated');
+      print('✅ sensorData snapshot processed and UI updated');
     } catch (e) {
-      print('❌ Error processing history: $e');
+      print('❌ Error processing latest sensorData: $e');
     }
   }
 
@@ -253,6 +191,8 @@ class Sensors extends GetxController {
     slouchyPercent.value = (data['zzz'] ?? 0).toDouble();
     rightPercent.value = (data['z'] ?? 0).toDouble();
     leftPercent.value = (data['zz'] ?? 0).toDouble();
+
+    _syncTodayCountersFromCurrentSnapshot();
   }
 
   /// Calculate weekly posture data from history
@@ -373,33 +313,14 @@ class Sensors extends GetxController {
     }
   }
 
-  /// Fetch and update today's aggregated posture data
-  /// Note: All users share the same data pool
-  Future<void> _fetchTodayData() async {
-    try {
-      final aggregatedData = await Mongodb.fetchTodayAggregatedData();
+  /// Keep home "today" counters synced from current sensorData snapshot only.
+  void _syncTodayCountersFromCurrentSnapshot() {
+    todaySlouchyCount.value = sCount.value;
+    todayLeftCount.value = lCount.value;
+    todayRightCount.value = rCount.value;
+    todayTotalCount.value = todaySlouchyCount.value + todayLeftCount.value + todayRightCount.value;
 
-      // Update today's counts
-      todaySlouchyCount.value = aggregatedData['slouchyCount'] ?? 0;
-      todayLeftCount.value = aggregatedData['leftCount'] ?? 0;
-      todayRightCount.value = aggregatedData['rightCount'] ?? 0;
-      todayTotalCount.value = aggregatedData['total'] ?? 0;
-
-      // Calculate and update percentages
-      final percentages = Mongodb.calculatePercentages(aggregatedData);
-      slouchyPercent.value = percentages['slouchyPercent'] ?? 0.0;
-      leftPercent.value = percentages['leftPercent'] ?? 0.0;
-      rightPercent.value = percentages['rightPercent'] ?? 0.0;
-
-      print('✅ Today\'s data updated:');
-      print(
-        '   Slouchy: ${todaySlouchyCount.value} (${slouchyPercent.value}%)',
-      );
-      print('   Left: ${todayLeftCount.value} (${leftPercent.value}%)');
-      print('   Right: ${todayRightCount.value} (${rightPercent.value}%)');
-    } catch (e) {
-      print('❌ Error fetching today\'s data: $e');
-    }
+    print('✅ Home counters synced from sensorData snapshot');
   }
 
   /// Setup automatic reset at midnight (00:00)
@@ -432,15 +353,12 @@ class Sensors extends GetxController {
     rightPercent.value = 0.0;
 
     print('✅ Counters reset for new day');
-
-    // Fetch data for the new day
-    _fetchTodayData();
   }
 
   @override
   void onClose() {
     _midnightResetTimer?.cancel();
-    _historyFetchTimer?.cancel();
+    _sensorDataFetchTimer?.cancel();
     socket.disconnect();
     super.onClose();
   }

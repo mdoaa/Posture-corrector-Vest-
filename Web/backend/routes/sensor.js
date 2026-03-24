@@ -233,6 +233,25 @@ const getSensorRoutes = (io) => {
         }
     });
 
+    router.get('/sensor/aggregated', async (req, res) => {
+        try {
+            const windows = await Promise.all(
+                WINDOW_DEFINITIONS.map(async (windowDef) => {
+                    const summary = await buildWindowAggregate(windowDef.days);
+                    return [windowDef.key, summary];
+                })
+            );
+
+            return res.status(200).json({
+                generatedAt: new Date().toISOString(),
+                metrics: Object.fromEntries(windows),
+            });
+        } catch (err) {
+            console.error('Error fetching aggregated sensor data:', err);
+            return res.status(500).json({ error: 'error fetching aggregated sensor data from database' });
+        }
+    });
+
     router.get('/sensorHistory/aggregated', async (req, res) => {
         try {
             const windows = await Promise.all(
