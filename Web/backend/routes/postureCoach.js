@@ -3,9 +3,8 @@ import SitxHistory from "../models/sensorHistory.js";
 
 const router = express.Router();
 
-const AI_PROVIDER = (process.env.AI_PROVIDER || "groq").toLowerCase();
-const DEFAULT_XAI_MODEL = process.env.XAI_MODEL || "grok-4-1-fast";
 const DEFAULT_GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.1-8b-instant";
+const GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
 const MAX_MESSAGE_LENGTH = 700;
 const MAX_HISTORY_ITEMS = 12;
 const RATE_WINDOW_MS = 60 * 1000;
@@ -175,21 +174,12 @@ const sanitizeModelResponse = (value) => {
   };
 };
 
-const resolveAiConfig = () => {
-  if (AI_PROVIDER === "groq") {
-    return {
-      provider: "groq",
-      apiKey: sanitizeText(process.env.GROQ_API_KEY, 400),
-      model: sanitizeText(process.env.GROQ_MODEL, 120) || DEFAULT_GROQ_MODEL,
-      endpoint: "https://api.groq.com/openai/v1/chat/completions",
-    };
-  }
-
+const resolveGroqConfig = () => {
   return {
-    provider: "xai",
-    apiKey: sanitizeText(process.env.XAI_API_KEY, 400),
-    model: sanitizeText(process.env.XAI_MODEL, 120) || DEFAULT_XAI_MODEL,
-    endpoint: "https://api.x.ai/v1/chat/completions",
+    provider: "groq",
+    apiKey: sanitizeText(process.env.GROQ_API_KEY, 400),
+    model: sanitizeText(process.env.GROQ_MODEL, 120) || DEFAULT_GROQ_MODEL,
+    endpoint: GROQ_ENDPOINT,
   };
 };
 
@@ -223,16 +213,16 @@ const generateCoachReply = async (aiConfig, payload) => {
   const data = await response.json();
   const text = data?.choices?.[0]?.message?.content;
 
-  if (!text) throw new Error("xAI response did not include text content");
+  if (!text) throw new Error("AI response did not include text content");
 
   const parsed = parseModelJson(text);
-  if (!parsed) throw new Error("xAI response was not valid JSON");
+  if (!parsed) throw new Error("AI response was not valid JSON");
 
   return parsed;
 };
 
 router.get("/api/posture-coach/health", (req, res) => {
-  const aiConfig = resolveAiConfig();
+  const aiConfig = resolveGroqConfig();
   const hasApiKey = Boolean(aiConfig.apiKey);
   res.status(200).json({
     ok: true,
@@ -315,7 +305,7 @@ router.post("/api/posture-coach/chat", async (req, res) => {
     objective: "coach user on safer daily posture habits using the smart jacket features",
   };
 
-  const aiConfig = resolveAiConfig();
+  const aiConfig = resolveGroqConfig();
 
   // No API Key? Return an HTTP 503 instead of a fallback text.
   if (!aiConfig.apiKey) {
