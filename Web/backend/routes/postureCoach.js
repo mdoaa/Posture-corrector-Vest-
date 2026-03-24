@@ -3,7 +3,7 @@ import SitxHistory from "../models/sensorHistory.js";
 
 const router = express.Router();
 
-const DEFAULT_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-pro";
+const DEFAULT_MODEL = process.env.XAI_MODEL || "grok-4-1-fast";
 const MAX_MESSAGE_LENGTH = 700;
 const MAX_HISTORY_ITEMS = 12;
 const RATE_WINDOW_MS = 60 * 1000;
@@ -139,7 +139,7 @@ const enforceRateLimit = (key) => {
   return { allowed: true, retryAfterSec: 0 };
 };
 
-const parseGeminiJson = (text) => {
+const parseModelJson = (text) => {
   const direct = text.trim();
   try {
     return JSON.parse(direct);
@@ -174,49 +174,51 @@ const sanitizeModelResponse = (value) => {
 };
 
 const generateCoachReply = async (apiKey, payload) => {
-  const model = sanitizeText(process.env.GEMINI_MODEL, 80) || DEFAULT_MODEL;
+  const model = sanitizeText(process.env.XAI_MODEL, 80) || DEFAULT_MODEL;
 
   const requestBody = {
-    systemInstruction: { parts: [{ text: COACH_SYSTEM_PROMPT }] },
-    contents: [{ role: "user", parts: [{ text: JSON.stringify(payload) }] }],
-    generationConfig: {
-      temperature: 0.2,
-      topP: 0.9,
-      maxOutputTokens: 320,
-      responseMimeType: "application/json",
-    },
+    model,
+    stream: false,
+    temperature: 0.2,
+    messages: [
+      { role: "system", content: COACH_SYSTEM_PROMPT },
+      { role: "user", content: JSON.stringify(payload) },
+    ],
   };
 
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const endpoint = "https://api.x.ai/v1/chat/completions";
 
   const response = await fetch(endpoint, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
     body: JSON.stringify(requestBody),
   });
 
   if (!response.ok) {
     const responseText = await response.text();
-    throw new Error(`Gemini request failed (${response.status}): ${responseText.slice(0, 300)}`);
+    throw new Error(`xAI request failed (${response.status}): ${responseText.slice(0, 300)}`);
   }
 
   const data = await response.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  const text = data?.choices?.[0]?.message?.content;
 
-  if (!text) throw new Error("Gemini response did not include text content");
+  if (!text) throw new Error("xAI response did not include text content");
 
-  const parsed = parseGeminiJson(text);
-  if (!parsed) throw new Error("Gemini response was not valid JSON");
+  const parsed = parseModelJson(text);
+  if (!parsed) throw new Error("xAI response was not valid JSON");
 
   return parsed;
 };
 
 router.get("/api/posture-coach/health", (req, res) => {
-  const hasApiKey = Boolean(process.env.GEMINI_API_KEY);
+  const hasApiKey = Boolean(process.env.XAI_API_KEY);
   res.status(200).json({
     ok: true,
-    provider: "gemini",
-    model: process.env.GEMINI_MODEL || DEFAULT_MODEL,
+    provider: "xai",
+    model: process.env.XAI_MODEL || DEFAULT_MODEL,
     configured: hasApiKey,
   });
 });
@@ -294,11 +296,11 @@ router.post("/api/posture-coach/chat", async (req, res) => {
     objective: "coach user on safer daily posture habits using the smart jacket features",
   };
 
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.XAI_API_KEY;
 
   // No API Key? Return an HTTP 503 instead of a fallback text.
   if (!apiKey) {
-    console.error("API Error: Missing Gemini API Key");
+    console.error("API Error: Missing xAI API Key");
     return res.status(503).json({
       error: "AI_UNAVAILABLE",
       details: "The posture coach is not configured on the server."
@@ -320,8 +322,8 @@ router.post("/api/posture-coach/chat", async (req, res) => {
     }
 
     return res.status(200).json({
-      source: "gemini",
-      model: process.env.GEMINI_MODEL || DEFAULT_MODEL,
+      source: "xai",
+      model: process.env.XAI_MODEL || DEFAULT_MODEL,
       coach,
       medicalNotice: "This assistant supports posture wellness and education only, not diagnosis or treatment.",
     });
