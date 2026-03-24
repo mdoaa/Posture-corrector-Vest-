@@ -124,6 +124,73 @@ const sanitizeModelResponse = (value, fallback) => {
   };
 };
 
+const buildFallbackCoach = (payload) => {
+  const postureState = sanitizeText(payload?.postureState, 30).toLowerCase();
+  const trend = sanitizeText(payload?.trend, 40).toLowerCase();
+  const slouchDurationSec = clampNumber(payload?.slouchDurationSec, 0, 7200);
+  const correctionsToday = clampNumber(payload?.correctionsToday, 0, 500);
+  const discomfortLevel = clampNumber(payload?.discomfortLevel, 0, 10);
+  const message = sanitizeText(payload?.message, 240).toLowerCase();
+
+  if (discomfortLevel >= 7) {
+    return {
+      messageType: "safety",
+      riskLevel: "medium",
+      reply:
+        "Your discomfort sounds significant. Stop and rest now, and avoid forcing posture corrections.",
+      suggestedAction:
+        "Take a 10-minute break, use gentle movement only, and seek medical advice if pain persists.",
+    };
+  }
+
+  const isSlouching = postureState === "slouching" || message.includes("slouch");
+  const isWorsening = trend === "worsening";
+  const longSlouch = slouchDurationSec >= 1800;
+  const manyCorrections = correctionsToday >= 15;
+
+  if (isSlouching && isWorsening) {
+    return {
+      messageType: "action",
+      riskLevel: "low",
+      reply:
+        "You are trending toward more slouching. Reset now: feet flat, hips back in the chair, shoulders relaxed, and screen at eye level.",
+      suggestedAction:
+        "Use a 25-5 cycle: every 25 minutes sit tall, then take a 2-5 minute stand-and-stretch break.",
+    };
+  }
+
+  if (isSlouching || longSlouch) {
+    return {
+      messageType: "insight",
+      riskLevel: "low",
+      reply:
+        "A long slouch period can overload your neck and lower back. Small frequent posture resets work better than one big correction.",
+      suggestedAction:
+        "Set a reminder every 20-30 minutes: chin tucked, ribs stacked over hips, and both feet grounded.",
+    };
+  }
+
+  if (manyCorrections) {
+    return {
+      messageType: "reinforcement",
+      riskLevel: "low",
+      reply:
+        "Great effort today. High correction count means you are building awareness, which is the first step to better posture habits.",
+      suggestedAction:
+        "Keep the same routine and add one short chest-opening stretch after each study block.",
+    };
+  }
+
+  return {
+    messageType: "reinforcement",
+    riskLevel: "low",
+    reply:
+      "Your posture status looks relatively stable. Keep movements regular and avoid staying in one position for too long.",
+    suggestedAction:
+      "Do one 60-second reset now: stand up, roll shoulders back, and take 5 deep breaths.",
+  };
+};
+
 const generateCoachReply = async (apiKey, payload) => {
   const model = sanitizeText(process.env.GEMINI_MODEL, 80) || DEFAULT_MODEL;
 
@@ -250,9 +317,10 @@ router.post("/api/posture-coach/chat", async (req, res) => {
   const apiKey = process.env.GEMINI_API_KEY;
 
   if (!apiKey) {
+    const fallbackCoach = buildFallbackCoach(payload);
     return res.status(200).json({
-      source: "unavailable",
-      coach: MODEL_UNAVAILABLE_RESPONSE,
+      source: "fallback",
+      coach: fallbackCoach,
       medicalNotice:
         "This assistant supports posture wellness only and does not provide medical diagnosis.",
     });
@@ -280,9 +348,10 @@ router.post("/api/posture-coach/chat", async (req, res) => {
     });
   } catch (error) {
     console.error("Posture coach generation failed:", error.message);
+    const fallbackCoach = buildFallbackCoach(payload);
     return res.status(200).json({
-      source: "unavailable",
-      coach: MODEL_UNAVAILABLE_RESPONSE,
+      source: "fallback",
+      coach: fallbackCoach,
       medicalNotice:
         "This assistant supports posture wellness only and does not provide medical diagnosis.",
     });
