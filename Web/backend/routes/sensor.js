@@ -12,6 +12,7 @@ const WINDOW_DEFINITIONS = [
 ];
 
 const AGGREGETED_WINDOWS = [7, 14, 30, 180, 365];
+const PREAGGREGATION_TTL_MS = 60 * 1000;
 
 const toNumber = (value) => Number(value || 0);
 
@@ -27,6 +28,17 @@ const toValidTime = (value) => {
     const time = date.getTime();
     return Number.isNaN(time) ? null : time;
 };
+
+const preaggregationCache = {
+    generatedAt: null,
+    aggregatedMetrics: null,
+    aggregetedMetrics: null,
+    cachedAtMs: 0,
+    expiresAtMs: 0,
+};
+
+let preaggregationRefreshPromise = null;
+let preaggregationSchedulerStarted = false;
 
 const buildWindowAggregate = async (days) => {
     const now = new Date();
@@ -137,8 +149,126 @@ const buildWindowAggregate = async (days) => {
     };
 };
 
+const buildAggregatedMetricsPayload = async () => {
+    const windows = await Promise.all(
+        WINDOW_DEFINITIONS.map(async (windowDef) => {
+            const summary = await buildWindowAggregate(windowDef.days);
+            return [windowDef.key, summary];
+        })
+    );
+
+    return Object.fromEntries(windows);
+};
+
+const buildAggregetedMetricsPayload = async () => {
+    const windows = await Promise.all(
+        AGGREGETED_WINDOWS.map(async (days) => {
+            const summary = await buildWindowAggregate(days);
+            return [`day${days}`, summary];
+        })
+    );
+
+    return Object.fromEntries(windows);
+};
+
+const refreshPreaggregationCache = async ({ force = false } = {}) => {
+    const now = Date.now();
+    const hasFreshCache = preaggregationCache.aggregatedMetrics && preaggregationCache.expiresAtMs > now;
+
+    if (!force && hasFreshCache) {
+        return preaggregationCache;
+    }
+
+    if (preaggregationRefreshPromise) {
+        return preaggregationRefreshPromise;
+    }
+
+    preaggregationRefreshPromise = (async () => {
+        const [aggregatedMetrics, aggregetedMetrics] = await Promise.all([
+            buildAggregatedMetricsPayload(),
+            buildAggregetedMetricsPayload(),
+        ]);
+
+        const generatedAt = new Date().toISOString();
+        const cachedAtMs = Date.now();
+
+        preaggregationCache.generatedAt = generatedAt;
+        preaggregationCache.aggregatedMetrics = aggregatedMetrics;
+        preaggregationCache.aggregetedMetrics = aggregetedMetrics;
+        preaggregationCache.cachedAtMs = cachedAtMs;
+        preaggregationCache.expiresAtMs = cachedAtMs + PREAGGREGATION_TTL_MS;
+
+        return preaggregationCache;
+    })();
+
+    try {
+        return await preaggregationRefreshPromise;
+    } finally {
+        preaggregationRefreshPromise = null;
+    }
+};
+
+const getPreaggregatedPayload = async (type) => {
+    const now = Date.now();
+    const hasAnyCache = Boolean(preaggregationCache.generatedAt);
+    const isFresh = preaggregationCache.expiresAtMs > now;
+
+    if (hasAnyCache && isFresh) {
+        return {
+            generatedAt: preaggregationCache.generatedAt,
+            metrics: type === 'aggregeted'
+                ? preaggregationCache.aggregetedMetrics
+                : preaggregationCache.aggregatedMetrics,
+        };
+    }
+
+    if (hasAnyCache && !isFresh) {
+        refreshPreaggregationCache({ force: true }).catch((err) => {
+            console.error('Background pre-aggregation refresh failed:', err);
+        });
+
+        return {
+            generatedAt: preaggregationCache.generatedAt,
+            metrics: type === 'aggregeted'
+                ? preaggregationCache.aggregetedMetrics
+                : preaggregationCache.aggregatedMetrics,
+        };
+    }
+
+    const cache = await refreshPreaggregationCache({ force: true });
+    return {
+        generatedAt: cache.generatedAt,
+        metrics: type === 'aggregeted'
+            ? cache.aggregetedMetrics
+            : cache.aggregatedMetrics,
+    };
+};
+
+const startPreaggregationScheduler = () => {
+    if (preaggregationSchedulerStarted) {
+        return;
+    }
+
+    preaggregationSchedulerStarted = true;
+
+    refreshPreaggregationCache({ force: true }).catch((err) => {
+        console.error('Initial pre-aggregation warmup failed:', err);
+    });
+
+    const timer = setInterval(() => {
+        refreshPreaggregationCache({ force: true }).catch((err) => {
+            console.error('Scheduled pre-aggregation refresh failed:', err);
+        });
+    }, PREAGGREGATION_TTL_MS);
+
+    if (typeof timer.unref === 'function') {
+        timer.unref();
+    }
+};
+
 const getSensorRoutes = (io) => {
     const router = express.Router();
+    startPreaggregationScheduler();
 
     router.get('/sensorData', async (req, res) => {
         try {
@@ -184,17 +314,8 @@ const getSensorRoutes = (io) => {
 
     router.get('/sensorHistory/aggregeted', async (req, res) => {
         try {
-            const windows = await Promise.all(
-                AGGREGETED_WINDOWS.map(async (days) => {
-                    const summary = await buildWindowAggregate(days);
-                    return [`day${days}`, summary];
-                })
-            );
-
-            return res.status(200).json({
-                generatedAt: new Date().toISOString(),
-                metrics: Object.fromEntries(windows),
-            });
+            const payload = await getPreaggregatedPayload('aggregeted');
+            return res.status(200).json(payload);
         } catch (err) {
             console.error('Error fetching aggregeted sensor history:', err);
             return res.status(500).json({ error: 'error fetching aggregeted sensor history from database' });
@@ -235,17 +356,8 @@ const getSensorRoutes = (io) => {
 
     router.get('/sensor/aggregated', async (req, res) => {
         try {
-            const windows = await Promise.all(
-                WINDOW_DEFINITIONS.map(async (windowDef) => {
-                    const summary = await buildWindowAggregate(windowDef.days);
-                    return [windowDef.key, summary];
-                })
-            );
-
-            return res.status(200).json({
-                generatedAt: new Date().toISOString(),
-                metrics: Object.fromEntries(windows),
-            });
+            const payload = await getPreaggregatedPayload('aggregated');
+            return res.status(200).json(payload);
         } catch (err) {
             console.error('Error fetching aggregated sensor data:', err);
             return res.status(500).json({ error: 'error fetching aggregated sensor data from database' });
@@ -254,17 +366,8 @@ const getSensorRoutes = (io) => {
 
     router.get('/sensorHistory/aggregated', async (req, res) => {
         try {
-            const windows = await Promise.all(
-                WINDOW_DEFINITIONS.map(async (windowDef) => {
-                    const summary = await buildWindowAggregate(windowDef.days);
-                    return [windowDef.key, summary];
-                })
-            );
-
-            return res.status(200).json({
-                generatedAt: new Date().toISOString(),
-                metrics: Object.fromEntries(windows),
-            });
+            const payload = await getPreaggregatedPayload('aggregated');
+            return res.status(200).json(payload);
         } catch (err) {
             console.error('Error fetching aggregated sensor history:', err);
             return res.status(500).json({ error: 'error fetching aggregated sensor history from database' });

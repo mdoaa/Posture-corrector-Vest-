@@ -1,5 +1,4 @@
 import express from "express";
-import SitxHistory from "../models/sensorHistory.js";
 
 const router = express.Router();
 
@@ -73,76 +72,6 @@ const fetchAggregatedContext = async (req) => {
   }
 
   return { hasData: false, source: null, generatedAt: null, metrics: {} };
-};
-
-const counter = (record, key) => Number(record?.[key] || 0);
-
-const safePct = (num, den) => {
-  if (!Number.isFinite(num) || !Number.isFinite(den) || den <= 0) {
-    return 0;
-  }
-  return Number(((num / den) * 100).toFixed(2));
-};
-
-const buildSingleVestHistoryContext = async () => {
-  const now = Date.now();
-  const sevenDaysAgo = new Date(now - 7 * 24 * 60 * 60 * 1000);
-  const thirtyDaysAgo = new Date(now - 30 * 24 * 60 * 60 * 1000);
-
-  const [latest, baseline7, baseline30, firstRecord, totalRecords] = await Promise.all([
-    SitxHistory.findOne().sort({ receivedAt: -1 }).lean(),
-    SitxHistory.findOne({ receivedAt: { $lt: sevenDaysAgo } }).sort({ receivedAt: -1 }).lean(),
-    SitxHistory.findOne({ receivedAt: { $lt: thirtyDaysAgo } }).sort({ receivedAt: -1 }).lean(),
-    SitxHistory.findOne().sort({ receivedAt: 1 }).lean(),
-    SitxHistory.countDocuments(),
-  ]);
-
-  if (!latest) {
-    return { hasData: false, totalRecords: 0 };
-  }
-
-  const delta = (key, baseline) => Math.max(0, counter(latest, key) - counter(baseline, key));
-
-  const slouch7 = delta("i", baseline7);
-  const normal7 = delta("h", baseline7);
-  const left7 = delta("g", baseline7);
-  const right7 = delta("f", baseline7);
-  const postureEvents7 = slouch7 + normal7 + left7 + right7;
-
-  const slouch30 = delta("i", baseline30);
-  const normal30 = delta("h", baseline30);
-  const left30 = delta("g", baseline30);
-  const right30 = delta("f", baseline30);
-  const postureEvents30 = slouch30 + normal30 + left30 + right30;
-
-  return {
-    hasData: true,
-    totalRecords,
-    latestAt: latest.receivedAt || null,
-    sevenDay: {
-      slouch: slouch7,
-      normal: normal7,
-      left: left7,
-      right: right7,
-      totalPostureEvents: postureEvents7,
-      slouchPercent: safePct(slouch7, postureEvents7),
-    },
-    thirtyDay: {
-      slouch: slouch30,
-      normal: normal30,
-      left: left30,
-      right: right30,
-      totalPostureEvents: postureEvents30,
-      slouchPercent: safePct(slouch30, postureEvents30),
-    },
-    allTime: {
-      slouch: delta("i", firstRecord),
-      normal: delta("h", firstRecord),
-      left: delta("g", firstRecord),
-      right: delta("f", firstRecord),
-      airChamber: delta("j", firstRecord),
-    },
-  };
 };
 
 const EMERGENCY_KEYWORDS = [
@@ -392,13 +321,7 @@ router.post("/api/posture-coach/chat", async (req, res) => {
     });
   }
 
-  let historyContext = { hasData: false, totalRecords: 0 };
   let aggregatedContext = { hasData: false, source: null, generatedAt: null, metrics: {} };
-  try {
-    historyContext = await buildSingleVestHistoryContext();
-  } catch (error) {
-    console.error("Failed to build vest history context:", error.message);
-  }
 
   try {
     aggregatedContext = await fetchAggregatedContext(req);
@@ -417,7 +340,6 @@ router.post("/api/posture-coach/chat", async (req, res) => {
     hardwareState, // Injecting hardware context for the AI
     languageHint,
     history,
-    vestHistoryContext: historyContext,
     aggregatedSensorContext: aggregatedContext,
     objective: "coach user on safer daily posture habits using the smart jacket features",
   };

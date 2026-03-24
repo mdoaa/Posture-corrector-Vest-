@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:get/get.dart';
 
 import '../../Services/mongodb.dart';
@@ -7,8 +5,6 @@ import '../../Services/mongodb.dart';
 enum DateRange { today, week, twoWeeks, month, sixMonths, year }
 
 class StateScreenController extends GetxController {
-  static const Duration _refreshInterval = Duration(seconds: 15);
-
   Rx<DateRange> selectedRange = DateRange.today.obs;
   RxBool isLoading = true.obs;
 
@@ -28,22 +24,12 @@ class StateScreenController extends GetxController {
   RxInt monthlySlouchy = 0.obs;
   RxInt monthlyVibration = 0.obs;
 
-  Timer? _refreshTimer;
   final Map<DateRange, Map<String, int>> _rangeMetrics = {};
 
   @override
   void onInit() {
     super.onInit();
     fetchAllRanges();
-    _refreshTimer = Timer.periodic(_refreshInterval, (_) {
-      fetchAllRanges();
-    });
-  }
-
-  @override
-  void onClose() {
-    _refreshTimer?.cancel();
-    super.onClose();
   }
 
   Future<void> fetchAllRanges() async {
