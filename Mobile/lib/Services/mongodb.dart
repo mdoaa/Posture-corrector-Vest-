@@ -464,4 +464,183 @@ class Mongodb {
 
     return {'slouchy': 0, 'left': 0, 'right': 0, 'normal': 0, 'days': days};
   }
+
+  /// Fetch today's aggregated metrics from /sensorHistory/aggregated.
+  /// Returns keys: normalCount, slouchyCount,
+  /// vibrationActiveDurationSec, airChamberActiveDurationSec.
+  static Future<Map<String, int>> fetchTodayAggregatedWindow() async {
+    final endpoints = [
+      '$baseUrl/sensorHistory/aggregated',
+      '$baseUrl/api/sensorHistory/aggregated',
+      '$baseUrl/api/sensor/history/aggregated',
+      '$baseUrl/api/sensor/sensorHistory/aggregated',
+    ];
+
+    for (final endpoint in endpoints) {
+      final url = Uri.parse(endpoint);
+      try {
+        final response = await http.get(
+          url,
+          headers: {'Content-Type': 'application/json'},
+        );
+
+        if (response.statusCode == 200) {
+          final dynamic decodedData = jsonDecode(response.body);
+          if (decodedData is! Map<String, dynamic>) {
+            continue;
+          }
+
+          final dynamic metrics = decodedData['metrics'];
+          if (metrics is! Map<String, dynamic>) {
+            continue;
+          }
+
+          final dynamic today = metrics['today'];
+          if (today is! Map<String, dynamic>) {
+            continue;
+          }
+
+          int parseInt(dynamic value) {
+            if (value is int) return value;
+            if (value is double) return value.toInt();
+            return int.tryParse(value?.toString() ?? '') ?? 0;
+          }
+
+          return {
+            'normalCount': parseInt(today['normalCount']),
+            'slouchyCount': parseInt(today['slouchyCount']),
+            'vibrationActiveDurationSec':
+                parseInt(today['vibrationActiveDurationSec']) != 0
+                ? parseInt(today['vibrationActiveDurationSec'])
+                : parseInt(today['vibrationOpenedCount']),
+            'airChamberActiveDurationSec':
+                parseInt(today['airChamberActiveDurationSec']) != 0
+                ? parseInt(today['airChamberActiveDurationSec'])
+                : parseInt(today['airChamberOpenedCount']),
+          };
+        }
+
+        if (response.statusCode == 404) {
+          continue;
+        }
+      } catch (e) {
+        print('❌ Error fetching today aggregated metrics from $endpoint: $e');
+      }
+    }
+
+    return {
+      'normalCount': 0,
+      'slouchyCount': 0,
+      'vibrationActiveDurationSec': 0,
+      'airChamberActiveDurationSec': 0,
+    };
+  }
+
+  /// Fetch all aggregated windows from /sensorHistory/aggregated.
+  /// Returns a map keyed by: today, week, twoWeeks, month, sixMonths, year.
+  static Future<Map<String, Map<String, int>>> fetchAggregatedMetrics() async {
+    final endpoints = [
+      '$baseUrl/sensorHistory/aggregated',
+      '$baseUrl/api/sensorHistory/aggregated',
+      '$baseUrl/api/sensor/history/aggregated',
+      '$baseUrl/api/sensor/sensorHistory/aggregated',
+    ];
+
+    int parseInt(dynamic value) {
+      if (value is int) return value;
+      if (value is double) return value.toInt();
+      return int.tryParse(value?.toString() ?? '') ?? 0;
+    }
+
+    for (final endpoint in endpoints) {
+      try {
+        final response = await http.get(
+          Uri.parse(endpoint),
+          headers: {'Content-Type': 'application/json'},
+        );
+
+        if (response.statusCode != 200) {
+          if (response.statusCode == 404) continue;
+          continue;
+        }
+
+        final dynamic decoded = jsonDecode(response.body);
+        if (decoded is! Map<String, dynamic>) continue;
+
+        final dynamic metrics = decoded['metrics'];
+        if (metrics is! Map<String, dynamic>) continue;
+
+        final keys = ['today', 'week', 'twoWeeks', 'month', 'sixMonths', 'year'];
+        final Map<String, Map<String, int>> result = {};
+
+        for (final key in keys) {
+          final dynamic window = metrics[key];
+          if (window is Map<String, dynamic>) {
+            result[key] = {
+              'normalCount': parseInt(window['normalCount']),
+              'slouchyCount': parseInt(window['slouchyCount']),
+              'vibrationActiveDurationSec':
+                  parseInt(window['vibrationActiveDurationSec']) != 0
+                  ? parseInt(window['vibrationActiveDurationSec'])
+                  : parseInt(window['vibrationOpenedCount']),
+              'airChamberActiveDurationSec':
+                  parseInt(window['airChamberActiveDurationSec']) != 0
+                  ? parseInt(window['airChamberActiveDurationSec'])
+                  : parseInt(window['airChamberOpenedCount']),
+            };
+          } else {
+            result[key] = {
+              'normalCount': 0,
+              'slouchyCount': 0,
+              'vibrationActiveDurationSec': 0,
+              'airChamberActiveDurationSec': 0,
+            };
+          }
+        }
+
+        return result;
+      } catch (e) {
+        print('❌ Error fetching aggregated metrics from $endpoint: $e');
+      }
+    }
+
+    return {
+      'today': {
+        'normalCount': 0,
+        'slouchyCount': 0,
+        'vibrationActiveDurationSec': 0,
+        'airChamberActiveDurationSec': 0,
+      },
+      'week': {
+        'normalCount': 0,
+        'slouchyCount': 0,
+        'vibrationActiveDurationSec': 0,
+        'airChamberActiveDurationSec': 0,
+      },
+      'twoWeeks': {
+        'normalCount': 0,
+        'slouchyCount': 0,
+        'vibrationActiveDurationSec': 0,
+        'airChamberActiveDurationSec': 0,
+      },
+      'month': {
+        'normalCount': 0,
+        'slouchyCount': 0,
+        'vibrationActiveDurationSec': 0,
+        'airChamberActiveDurationSec': 0,
+      },
+      'sixMonths': {
+        'normalCount': 0,
+        'slouchyCount': 0,
+        'vibrationActiveDurationSec': 0,
+        'airChamberActiveDurationSec': 0,
+      },
+      'year': {
+        'normalCount': 0,
+        'slouchyCount': 0,
+        'vibrationActiveDurationSec': 0,
+        'airChamberActiveDurationSec': 0,
+      },
+    };
+  }
 }

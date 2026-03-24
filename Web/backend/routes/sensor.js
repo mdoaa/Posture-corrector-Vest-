@@ -13,12 +13,21 @@ const WINDOW_DEFINITIONS = [
     { key: 'year', days: 365 },
 ];
 
+const AGGREGETED_WINDOWS = [7, 14, 30, 180, 365];
+
 const toNumber = (value) => Number(value || 0);
 
 const toIsoOrNull = (value) => {
     if (!value) return null;
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? null : date.toISOString();
+};
+
+const toValidTime = (value) => {
+    if (!value) return null;
+    const date = new Date(value);
+    const time = date.getTime();
+    return Number.isNaN(time) ? null : time;
 };
 
 const buildWindowAggregate = async (days) => {
@@ -46,41 +55,55 @@ const buildWindowAggregate = async (days) => {
             vibrationOpenedCount: 0,
             airChamberOpenedCount: 0,
             valveOpenedCount: 0,
+            vibrationActiveDurationSec: 0,
+            airChamberActiveDurationSec: 0,
+            valveOpenDurationSec: 0,
         };
     }
 
     const normalCount = Math.max(0, toNumber(latestInRange.h) - toNumber(baselineBeforeRange?.h));
     const slouchyCount = Math.max(0, toNumber(latestInRange.i) - toNumber(baselineBeforeRange?.i));
 
-    let vibrationOpenedCount = 0;
-    let airChamberOpenedCount = 0;
-    let valveOpenedCount = 0;
+    let vibrationActiveMs = 0;
+    let airChamberActiveMs = 0;
+    let valveOpenMs = 0;
 
-    let prevVibrationEnabled = Boolean(baselineBeforeRange?.c);
-    let prevPumpRunning = Boolean(baselineBeforeRange?.b);
-    let prevValveOpen = Boolean(baselineBeforeRange?.a);
+    const rangeStartMs = rangeStart.getTime();
+    const nowMs = now.getTime();
+
+    let isVibrationEnabled = Boolean(baselineBeforeRange?.c);
+    let isPumpRunning = Boolean(baselineBeforeRange?.b);
+    let isValveOpen = Boolean(baselineBeforeRange?.a);
+
+    let cursorMs = rangeStartMs;
 
     for (const record of rangeRecords) {
-        const currentVibrationEnabled = Boolean(record?.c);
-        const currentPumpRunning = Boolean(record?.b);
-        const currentValveOpen = Boolean(record?.a);
-
-        if (currentVibrationEnabled && !prevVibrationEnabled) {
-            vibrationOpenedCount += 1;
+        const recordMs = toValidTime(record?.receivedAt);
+        if (recordMs === null) {
+            continue;
         }
 
-        if (currentPumpRunning && !prevPumpRunning) {
-            airChamberOpenedCount += 1;
-        }
+        const boundedRecordMs = Math.min(Math.max(recordMs, rangeStartMs), nowMs);
+        const deltaMs = Math.max(0, boundedRecordMs - cursorMs);
 
-        if (currentValveOpen && !prevValveOpen) {
-            valveOpenedCount += 1;
-        }
+        if (isVibrationEnabled) vibrationActiveMs += deltaMs;
+        if (isPumpRunning) airChamberActiveMs += deltaMs;
+        if (isValveOpen) valveOpenMs += deltaMs;
 
-        prevVibrationEnabled = currentVibrationEnabled;
-        prevPumpRunning = currentPumpRunning;
-        prevValveOpen = currentValveOpen;
+        isVibrationEnabled = Boolean(record?.c);
+        isPumpRunning = Boolean(record?.b);
+        isValveOpen = Boolean(record?.a);
+        cursorMs = boundedRecordMs;
     }
+
+    const tailMs = Math.max(0, nowMs - cursorMs);
+    if (isVibrationEnabled) vibrationActiveMs += tailMs;
+    if (isPumpRunning) airChamberActiveMs += tailMs;
+    if (isValveOpen) valveOpenMs += tailMs;
+
+    const vibrationActiveDurationSec = Math.floor(vibrationActiveMs / 1000);
+    const airChamberActiveDurationSec = Math.floor(airChamberActiveMs / 1000);
+    const valveOpenDurationSec = Math.floor(valveOpenMs / 1000);
 
     return {
         days,
@@ -90,9 +113,13 @@ const buildWindowAggregate = async (days) => {
         recordsInRange: rangeRecords.length,
         normalCount,
         slouchyCount,
-        vibrationOpenedCount,
-        airChamberOpenedCount,
-        valveOpenedCount,
+        // These keys are kept for backward compatibility, but now represent active seconds, not open-event counts.
+        vibrationOpenedCount: vibrationActiveDurationSec,
+        airChamberOpenedCount: airChamberActiveDurationSec,
+        valveOpenedCount: valveOpenDurationSec,
+        vibrationActiveDurationSec,
+        airChamberActiveDurationSec,
+        valveOpenDurationSec,
     };
 };
 
@@ -137,6 +164,25 @@ router.get('/sensorHistory', async (req, res) => {
     } catch (err) {
         console.error('Error fetching sensor history:', err);
         res.status(500).json({ error: 'error fetching sensor history from database' });
+    }
+});
+
+router.get('/sensorHistory/aggregeted', async (req, res) => {
+    try {
+        const windows = await Promise.all(
+            AGGREGETED_WINDOWS.map(async (days) => {
+                const summary = await buildWindowAggregate(days);
+                return [`day${days}`, summary];
+            })
+        );
+
+        return res.status(200).json({
+            generatedAt: new Date().toISOString(),
+            metrics: Object.fromEntries(windows),
+        });
+    } catch (err) {
+        console.error('Error fetching aggregeted sensor history:', err);
+        return res.status(500).json({ error: 'error fetching aggregeted sensor history from database' });
     }
 });
 
