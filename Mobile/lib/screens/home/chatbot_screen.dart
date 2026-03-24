@@ -28,6 +28,8 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
   ];
 
   bool isSending = false;
+  static const String _serverUnavailableMessage =
+      'Server is unavailable right now. Please try again later.';
 
   @override
   void dispose() {
@@ -83,6 +85,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
 
       if (response.statusCode == 200) {
         final decoded = jsonDecode(response.body);
+        final source = (decoded['source'] as String? ?? '').toLowerCase();
         final coach = decoded['coach'];
         final reply = coach is Map<String, dynamic> ? (coach['reply'] as String? ?? '') : '';
 
@@ -90,9 +93,9 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
           messages.add(
             _ChatMessage(
               sender: _Sender.coach,
-              text: reply.isNotEmpty
-                  ? reply
-                  : 'Posture coach is unavailable. Please try again later.',
+              text: source == 'unavailable'
+                  ? _serverUnavailableMessage
+                  : (reply.isNotEmpty ? reply : _serverUnavailableMessage),
             ),
           );
         });
@@ -101,7 +104,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
           messages.add(
             _ChatMessage(
               sender: _Sender.coach,
-              text: 'Posture coach is unavailable. Please try again later.',
+              text: _serverUnavailableMessage,
             ),
           );
         });
@@ -111,7 +114,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
         messages.add(
           _ChatMessage(
             sender: _Sender.coach,
-            text: 'Posture coach is unavailable. Please try again later.',
+            text: _serverUnavailableMessage,
           ),
         );
       });

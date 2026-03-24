@@ -1,4 +1,5 @@
 import express from "express";
+import SitxHistory from "../models/sensorHistory.js";
 
 const router = express.Router();
 
@@ -9,6 +10,88 @@ const RATE_WINDOW_MS = 60 * 1000;
 const RATE_LIMIT_COUNT = 20;
 
 const requestBuckets = new Map();
+
+const DEFAULT_SINGLE_USER_ID = "vest-single-user";
+
+const counter = (record, key) => Number(record?.[key] || 0);
+
+const safePct = (num, den) => {
+  if (!Number.isFinite(num) || !Number.isFinite(den) || den <= 0) {
+    return 0;
+  }
+
+  return Number(((num / den) * 100).toFixed(2));
+};
+
+const buildSingleVestHistoryContext = async () => {
+  const now = Date.now();
+  const sevenDaysAgo = new Date(now - 7 * 24 * 60 * 60 * 1000);
+  const thirtyDaysAgo = new Date(now - 30 * 24 * 60 * 60 * 1000);
+
+  const [latest, baseline7, baseline30, firstRecord, totalRecords] = await Promise.all([
+    SitxHistory.findOne().sort({ receivedAt: -1 }).lean(),
+    SitxHistory.findOne({ receivedAt: { $lt: sevenDaysAgo } }).sort({ receivedAt: -1 }).lean(),
+    SitxHistory.findOne({ receivedAt: { $lt: thirtyDaysAgo } }).sort({ receivedAt: -1 }).lean(),
+    SitxHistory.findOne().sort({ receivedAt: 1 }).lean(),
+    SitxHistory.countDocuments(),
+  ]);
+
+  if (!latest) {
+    return {
+      hasData: false,
+      totalRecords: 0,
+    };
+  }
+
+  const delta = (key, baseline) => Math.max(0, counter(latest, key) - counter(baseline, key));
+
+  const slouch7 = delta("i", baseline7);
+  const normal7 = delta("h", baseline7);
+  const left7 = delta("g", baseline7);
+  const right7 = delta("f", baseline7);
+  const postureEvents7 = slouch7 + normal7 + left7 + right7;
+
+  const slouch30 = delta("i", baseline30);
+  const normal30 = delta("h", baseline30);
+  const left30 = delta("g", baseline30);
+  const right30 = delta("f", baseline30);
+  const postureEvents30 = slouch30 + normal30 + left30 + right30;
+
+  const totalSlouchFromStart = delta("i", firstRecord);
+  const totalNormalFromStart = delta("h", firstRecord);
+  const totalLeftFromStart = delta("g", firstRecord);
+  const totalRightFromStart = delta("f", firstRecord);
+  const totalAirChamberFromStart = delta("j", firstRecord);
+
+  return {
+    hasData: true,
+    totalRecords,
+    latestAt: latest.receivedAt || null,
+    sevenDay: {
+      slouch: slouch7,
+      normal: normal7,
+      left: left7,
+      right: right7,
+      totalPostureEvents: postureEvents7,
+      slouchPercent: safePct(slouch7, postureEvents7),
+    },
+    thirtyDay: {
+      slouch: slouch30,
+      normal: normal30,
+      left: left30,
+      right: right30,
+      totalPostureEvents: postureEvents30,
+      slouchPercent: safePct(slouch30, postureEvents30),
+    },
+    allTime: {
+      slouch: totalSlouchFromStart,
+      normal: totalNormalFromStart,
+      left: totalLeftFromStart,
+      right: totalRightFromStart,
+      airChamber: totalAirChamberFromStart,
+    },
+  };
+};
 
 const EMERGENCY_KEYWORDS = [
   "chest pain",
@@ -257,7 +340,7 @@ router.get("/api/posture-coach/health", (req, res) => {
 });
 
 router.post("/api/posture-coach/chat", async (req, res) => {
-  const userId = sanitizeText(req.body?.userId, 80) || "anonymous";
+  const userId = DEFAULT_SINGLE_USER_ID;
   const ip = sanitizeText(req.ip, 64) || "unknown";
   const rateKey = `${userId}:${ip}`;
 
@@ -303,7 +386,16 @@ router.post("/api/posture-coach/chat", async (req, res) => {
     });
   }
 
+  let historyContext = { hasData: false, totalRecords: 0 };
+
+  try {
+    historyContext = await buildSingleVestHistoryContext();
+  } catch (error) {
+    console.error("Failed to build vest history context:", error.message);
+  }
+
   const payload = {
+    userId,
     postureState,
     trend,
     slouchDurationSec,
@@ -311,6 +403,7 @@ router.post("/api/posture-coach/chat", async (req, res) => {
     discomfortLevel,
     message,
     history,
+    vestHistoryContext: historyContext,
     objective: "coach user on safer daily posture habits",
   };
 
