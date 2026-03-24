@@ -10,7 +10,6 @@ const RATE_WINDOW_MS = 60 * 1000;
 const RATE_LIMIT_COUNT = 20;
 
 const requestBuckets = new Map();
-
 const DEFAULT_SINGLE_USER_ID = "vest-single-user";
 
 const counter = (record, key) => Number(record?.[key] || 0);
@@ -19,7 +18,6 @@ const safePct = (num, den) => {
   if (!Number.isFinite(num) || !Number.isFinite(den) || den <= 0) {
     return 0;
   }
-
   return Number(((num / den) * 100).toFixed(2));
 };
 
@@ -37,10 +35,7 @@ const buildSingleVestHistoryContext = async () => {
   ]);
 
   if (!latest) {
-    return {
-      hasData: false,
-      totalRecords: 0,
-    };
+    return { hasData: false, totalRecords: 0 };
   }
 
   const delta = (key, baseline) => Math.max(0, counter(latest, key) - counter(baseline, key));
@@ -56,12 +51,6 @@ const buildSingleVestHistoryContext = async () => {
   const left30 = delta("g", baseline30);
   const right30 = delta("f", baseline30);
   const postureEvents30 = slouch30 + normal30 + left30 + right30;
-
-  const totalSlouchFromStart = delta("i", firstRecord);
-  const totalNormalFromStart = delta("h", firstRecord);
-  const totalLeftFromStart = delta("g", firstRecord);
-  const totalRightFromStart = delta("f", firstRecord);
-  const totalAirChamberFromStart = delta("j", firstRecord);
 
   return {
     hasData: true,
@@ -84,33 +73,24 @@ const buildSingleVestHistoryContext = async () => {
       slouchPercent: safePct(slouch30, postureEvents30),
     },
     allTime: {
-      slouch: totalSlouchFromStart,
-      normal: totalNormalFromStart,
-      left: totalLeftFromStart,
-      right: totalRightFromStart,
-      airChamber: totalAirChamberFromStart,
+      slouch: delta("i", firstRecord),
+      normal: delta("h", firstRecord),
+      left: delta("g", firstRecord),
+      right: delta("f", firstRecord),
+      airChamber: delta("j", firstRecord),
     },
   };
 };
 
 const EMERGENCY_KEYWORDS = [
-  "chest pain",
-  "faint",
-  "fainted",
-  "numb",
-  "numbness",
-  "can not breathe",
-  "can't breathe",
-  "difficulty breathing",
-  "severe pain",
-  "emergency",
-  "suicidal",
-  "self harm",
-  "self-harm",
+  "chest pain", "faint", "fainted", "numb", "numbness",
+  "can not breathe", "can't breathe", "difficulty breathing",
+  "severe pain", "emergency", "suicidal", "self harm", "self-harm",
 ];
 
+// Updated System Prompt with Hardware Awareness
 const COACH_SYSTEM_PROMPT = [
-  "You are SitGuard Coach, a posture-support assistant for wellness and ergonomics.",
+  "You are SitGuard Coach, a posture-support AI integrated directly into a smart ergonomic jacket.",
   "Follow medical safety standards:",
   "1) Never diagnose medical conditions.",
   "2) Never prescribe medication or treatment plans.",
@@ -119,33 +99,21 @@ const COACH_SYSTEM_PROMPT = [
   "5) Keep guidance low-risk, supportive, and practical.",
   "6) Recommend professional evaluation for persistent or worsening pain.",
   "7) Do not shame or alarm users.",
+  "8) The user is wearing a jacket with controllable Air Chambers (lumbar support) and Vibration motors (haptic feedback).",
+  "9) If the user is slouching, you can suggest they turn on vibration reminders or inflate the air chamber.",
+  "10) If they complain of pressure or stiffness, suggest deflating the air chamber.",
   "Answer in short plain language suitable for mobile chat.",
-  "Return JSON only with this schema:",
-  '{"messageType":"alert|action|reinforcement|insight|safety","reply":"string","suggestedAction":"string","riskLevel":"low|medium|high"}',
+  "Return JSON only with this exact schema:",
+  '{"messageType":"alert|action|reinforcement|insight|safety","reply":"string","suggestedAction":"string","riskLevel":"low|medium|high", "deviceCommand":"none|inflate_chamber|deflate_chamber|enable_vibration|disable_vibration"}'
 ].join("\n");
-
-const MODEL_UNAVAILABLE_RESPONSE = {
-  messageType: "alert",
-  riskLevel: "low",
-  reply: "Posture coach is temporarily unavailable. Please try again later.",
-  suggestedAction: "Try again in a few minutes.",
-};
 
 const clampNumber = (value, min, max, fallback = 0) => {
   const parsed = Number(value);
-  if (!Number.isFinite(parsed)) {
-    return fallback;
-  }
-
-  return Math.max(min, Math.min(max, parsed));
+  return Number.isFinite(parsed) ? Math.max(min, Math.min(max, parsed)) : fallback;
 };
 
 const sanitizeText = (value, maxLength = MAX_MESSAGE_LENGTH) => {
-  if (typeof value !== "string") {
-    return "";
-  }
-
-  return value.trim().slice(0, maxLength);
+  return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
 };
 
 const hasEmergencyContent = (inputText) => {
@@ -173,15 +141,11 @@ const enforceRateLimit = (key) => {
 
 const parseGeminiJson = (text) => {
   const direct = text.trim();
-
   try {
     return JSON.parse(direct);
   } catch {
     const match = direct.match(/\{[\s\S]*\}/);
-    if (!match) {
-      return null;
-    }
-
+    if (!match) return null;
     try {
       return JSON.parse(match[0]);
     } catch {
@@ -190,159 +154,22 @@ const parseGeminiJson = (text) => {
   }
 };
 
-const sanitizeModelResponse = (value, fallback) => {
+// Updated Sanitizer without Fallbacks
+const sanitizeModelResponse = (value) => {
   const validTypes = new Set(["alert", "action", "reinforcement", "insight", "safety"]);
   const validRisk = new Set(["low", "medium", "high"]);
+  const validCommands = new Set(["none", "inflate_chamber", "deflate_chamber", "enable_vibration", "disable_vibration"]);
 
   const messageType = sanitizeText(value?.messageType, 20).toLowerCase();
   const riskLevel = sanitizeText(value?.riskLevel, 10).toLowerCase();
-  const reply = sanitizeText(value?.reply, 500);
-  const suggestedAction = sanitizeText(value?.suggestedAction, 220);
+  const deviceCommand = sanitizeText(value?.deviceCommand, 25).toLowerCase();
 
   return {
-    messageType: validTypes.has(messageType) ? messageType : fallback.messageType,
-    riskLevel: validRisk.has(riskLevel) ? riskLevel : fallback.riskLevel,
-    reply: reply || fallback.reply,
-    suggestedAction: suggestedAction || fallback.suggestedAction,
-  };
-};
-
-const buildFallbackCoach = (payload) => {
-  const postureState = sanitizeText(payload?.postureState, 30).toLowerCase();
-  const trend = sanitizeText(payload?.trend, 40).toLowerCase();
-  const slouchDurationSec = clampNumber(payload?.slouchDurationSec, 0, 7200);
-  const correctionsToday = clampNumber(payload?.correctionsToday, 0, 500);
-  const discomfortLevel = clampNumber(payload?.discomfortLevel, 0, 10);
-  const message = sanitizeText(payload?.message, 240).toLowerCase();
-  const history = payload?.vestHistoryContext || {};
-  const hasHistory = Boolean(history?.hasData);
-  const slouch7 = clampNumber(history?.sevenDay?.slouchPercent, 0, 100);
-  const slouch30 = clampNumber(history?.thirtyDay?.slouchPercent, 0, 100);
-
-  const setupQuestion =
-    message.includes("desk") ||
-    message.includes("chair") ||
-    message.includes("screen") ||
-    message.includes("setup");
-  const painMention =
-    message.includes("neck") ||
-    message.includes("back") ||
-    message.includes("pain") ||
-    message.includes("stiff");
-
-  if (discomfortLevel >= 7) {
-    return {
-      messageType: "safety",
-      riskLevel: "medium",
-      reply:
-        "Your discomfort sounds significant. Stop and rest now, and avoid forcing posture corrections.",
-      suggestedAction:
-        "Take a 10-minute break, use gentle movement only, and seek medical advice if pain persists.",
-    };
-  }
-
-  const isSlouching = postureState === "slouching" || message.includes("slouch");
-  const isWorsening = trend === "worsening";
-  const longSlouch = slouchDurationSec >= 1800;
-  const manyCorrections = correctionsToday >= 15;
-  const historyWorsening = hasHistory && slouch7 >= slouch30 + 5;
-  const historyImproving = hasHistory && slouch30 >= slouch7 + 5;
-
-  if (isSlouching && isWorsening) {
-    return {
-      messageType: "action",
-      riskLevel: "low",
-      reply:
-        "You are trending toward more slouching. Reset now: feet flat, hips back in the chair, shoulders relaxed, and screen at eye level.",
-      suggestedAction:
-        "Use a 25-5 cycle: every 25 minutes sit tall, then take a 2-5 minute stand-and-stretch break.",
-    };
-  }
-
-  if (historyWorsening) {
-    return {
-      messageType: "insight",
-      riskLevel: "low",
-      reply:
-        `Your recent trend is worse than your monthly baseline (${slouch7}% slouch in the last 7 days vs ${slouch30}% in 30 days). Let's tighten your daily reset routine.`,
-      suggestedAction:
-        "Add a 90-second posture reset every 20 minutes and stand for at least 3 minutes each hour.",
-    };
-  }
-
-  if (historyImproving) {
-    return {
-      messageType: "reinforcement",
-      riskLevel: "low",
-      reply:
-        `Good progress: your last 7-day slouch ratio (${slouch7}%) is better than your 30-day trend (${slouch30}%). Keep this consistency.`,
-      suggestedAction:
-        "Continue your current routine and add one short mobility drill at mid-day to lock in gains.",
-    };
-  }
-
-  if (setupQuestion) {
-    return {
-      messageType: "action",
-      riskLevel: "low",
-      reply:
-        "A better desk setup can reduce slouching quickly. Keep elbows near 90 degrees, top of screen at eye level, and back supported.",
-      suggestedAction:
-        "Adjust chair height so feet stay flat, then move screen to arm's length and eye level.",
-    };
-  }
-
-  if (painMention) {
-    return {
-      messageType: "insight",
-      riskLevel: "low",
-      reply:
-        "Pain usually increases when posture is static too long. Frequent low-effort movement is safer than forcing one perfect posture all day.",
-      suggestedAction:
-        "Do a 2-minute break now: stand, shoulder rolls, gentle neck range, then sit with ribs stacked over hips.",
-    };
-  }
-
-  if (manyCorrections) {
-    return {
-      messageType: "reinforcement",
-      riskLevel: "low",
-      reply:
-        "Great effort today. High correction count means you are building awareness, which is the first step to better posture habits.",
-      suggestedAction:
-        "Keep the same routine and add one short chest-opening stretch after each study block.",
-    };
-  }
-
-  if (longSlouch) {
-    return {
-      messageType: "insight",
-      riskLevel: "low",
-      reply:
-        "You stayed in a poor posture for a long period. Small frequent posture resets work better than one big correction.",
-      suggestedAction:
-        "Set a reminder every 20-30 minutes: chin tucked, ribs stacked over hips, and both feet grounded.",
-    };
-  }
-
-  if (isSlouching) {
-    return {
-      messageType: "action",
-      riskLevel: "low",
-      reply:
-        "Current posture suggests slouching. One immediate reset can reduce load on your neck and lower back.",
-      suggestedAction:
-        "Reset now: feet flat, hips back, shoulders down, and take 5 slow breaths before continuing.",
-    };
-  }
-
-  return {
-    messageType: "reinforcement",
-    riskLevel: "low",
-    reply:
-      "Your posture status looks relatively stable. Keep movements regular and avoid staying in one position for too long.",
-    suggestedAction:
-      "Do one 60-second reset now: stand up, roll shoulders back, and take 5 deep breaths.",
+    messageType: validTypes.has(messageType) ? messageType : "insight",
+    riskLevel: validRisk.has(riskLevel) ? riskLevel : "low",
+    deviceCommand: validCommands.has(deviceCommand) ? deviceCommand : "none",
+    reply: sanitizeText(value?.reply, 500) || "Keep up the focus on your posture.",
+    suggestedAction: sanitizeText(value?.suggestedAction, 220) || "Adjust your position if needed.",
   };
 };
 
@@ -350,19 +177,8 @@ const generateCoachReply = async (apiKey, payload) => {
   const model = sanitizeText(process.env.GEMINI_MODEL, 80) || DEFAULT_MODEL;
 
   const requestBody = {
-    systemInstruction: {
-      parts: [{ text: COACH_SYSTEM_PROMPT }],
-    },
-    contents: [
-      {
-        role: "user",
-        parts: [
-          {
-            text: JSON.stringify(payload),
-          },
-        ],
-      },
-    ],
+    systemInstruction: { parts: [{ text: COACH_SYSTEM_PROMPT }] },
+    contents: [{ role: "user", parts: [{ text: JSON.stringify(payload) }] }],
     generationConfig: {
       temperature: 0.2,
       topP: 0.9,
@@ -375,9 +191,7 @@ const generateCoachReply = async (apiKey, payload) => {
 
   const response = await fetch(endpoint, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(requestBody),
   });
 
@@ -389,14 +203,10 @@ const generateCoachReply = async (apiKey, payload) => {
   const data = await response.json();
   const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
 
-  if (!text) {
-    throw new Error("Gemini response did not include text content");
-  }
+  if (!text) throw new Error("Gemini response did not include text content");
 
   const parsed = parseGeminiJson(text);
-  if (!parsed) {
-    throw new Error("Gemini response was not valid JSON");
-  }
+  if (!parsed) throw new Error("Gemini response was not valid JSON");
 
   return parsed;
 };
@@ -431,6 +241,12 @@ router.post("/api/posture-coach/chat", async (req, res) => {
   const correctionsToday = clampNumber(req.body?.correctionsToday, 0, 500);
   const discomfortLevel = clampNumber(req.body?.discomfortLevel, 0, 10);
 
+  // Extract Hardware State from incoming request
+  const hardwareState = {
+    vibrationActive: Boolean(req.body?.vibrationActive),
+    airChamberActive: Boolean(req.body?.airChamberActive)
+  };
+
   const history = Array.isArray(req.body?.history)
     ? req.body.history.slice(-MAX_HISTORY_ITEMS).map((item) => sanitizeText(String(item), 200)).filter(Boolean)
     : [];
@@ -449,17 +265,15 @@ router.post("/api/posture-coach/chat", async (req, res) => {
       coach: {
         messageType: "safety",
         riskLevel: "high",
-        reply:
-          "Your symptoms may need urgent care. Please contact local emergency services now, or seek immediate medical attention.",
+        deviceCommand: "deflate_chamber", // Deflate chamber to relieve pressure in an emergency
+        reply: "Your symptoms may need urgent care. Please contact local emergency services now, or seek immediate medical attention.",
         suggestedAction: "Stop the session and get urgent medical help now.",
       },
-      medicalNotice:
-        "This assistant is not a medical professional and cannot diagnose conditions.",
+      medicalNotice: "This assistant is not a medical professional and cannot diagnose conditions.",
     });
   }
 
   let historyContext = { hasData: false, totalRecords: 0 };
-
   try {
     historyContext = await buildSingleVestHistoryContext();
   } catch (error) {
@@ -474,33 +288,34 @@ router.post("/api/posture-coach/chat", async (req, res) => {
     correctionsToday,
     discomfortLevel,
     message,
+    hardwareState, // Injecting hardware context for the AI
     history,
     vestHistoryContext: historyContext,
-    objective: "coach user on safer daily posture habits",
+    objective: "coach user on safer daily posture habits using the smart jacket features",
   };
 
   const apiKey = process.env.GEMINI_API_KEY;
 
+  // No API Key? Return an HTTP 503 instead of a fallback text.
   if (!apiKey) {
-    const fallbackCoach = buildFallbackCoach(payload);
-    return res.status(200).json({
-      source: "fallback",
-      coach: fallbackCoach,
-      medicalNotice:
-        "This assistant supports posture wellness only and does not provide medical diagnosis.",
+    console.error("API Error: Missing Gemini API Key");
+    return res.status(503).json({
+      error: "AI_UNAVAILABLE",
+      details: "The posture coach is not configured on the server."
     });
   }
 
   try {
     const modelResponse = await generateCoachReply(apiKey, payload);
-    const coach = sanitizeModelResponse(modelResponse, MODEL_UNAVAILABLE_RESPONSE);
+    const coach = sanitizeModelResponse(modelResponse);
 
+    // Final safety check on AI output
     const combinedText = `${coach.reply} ${coach.suggestedAction}`.toLowerCase();
     if (hasEmergencyContent(combinedText)) {
       coach.messageType = "safety";
       coach.riskLevel = "high";
-      coach.reply =
-        "I cannot provide emergency medical guidance. Please seek urgent in-person care or call emergency services now.";
+      coach.deviceCommand = "deflate_chamber";
+      coach.reply = "I cannot provide emergency medical guidance. Please seek urgent in-person care or call emergency services now.";
       coach.suggestedAction = "Stop and contact emergency services if symptoms are severe.";
     }
 
@@ -508,17 +323,15 @@ router.post("/api/posture-coach/chat", async (req, res) => {
       source: "gemini",
       model: process.env.GEMINI_MODEL || DEFAULT_MODEL,
       coach,
-      medicalNotice:
-        "This assistant supports posture wellness and education only, not diagnosis or treatment.",
+      medicalNotice: "This assistant supports posture wellness and education only, not diagnosis or treatment.",
     });
+
   } catch (error) {
+    // API Failed or Timeout? Return HTTP 503 instead of a fallback text.
     console.error("Posture coach generation failed:", error.message);
-    const fallbackCoach = buildFallbackCoach(payload);
-    return res.status(200).json({
-      source: "fallback",
-      coach: fallbackCoach,
-      medicalNotice:
-        "This assistant supports posture wellness only and does not provide medical diagnosis.",
+    return res.status(503).json({
+      error: "AI_UNAVAILABLE",
+      details: "The AI service is temporarily offline or unreachable."
     });
   }
 });
