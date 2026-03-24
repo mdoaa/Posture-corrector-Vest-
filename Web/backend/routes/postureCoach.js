@@ -214,6 +214,21 @@ const buildFallbackCoach = (payload) => {
   const correctionsToday = clampNumber(payload?.correctionsToday, 0, 500);
   const discomfortLevel = clampNumber(payload?.discomfortLevel, 0, 10);
   const message = sanitizeText(payload?.message, 240).toLowerCase();
+  const history = payload?.vestHistoryContext || {};
+  const hasHistory = Boolean(history?.hasData);
+  const slouch7 = clampNumber(history?.sevenDay?.slouchPercent, 0, 100);
+  const slouch30 = clampNumber(history?.thirtyDay?.slouchPercent, 0, 100);
+
+  const setupQuestion =
+    message.includes("desk") ||
+    message.includes("chair") ||
+    message.includes("screen") ||
+    message.includes("setup");
+  const painMention =
+    message.includes("neck") ||
+    message.includes("back") ||
+    message.includes("pain") ||
+    message.includes("stiff");
 
   if (discomfortLevel >= 7) {
     return {
@@ -230,6 +245,8 @@ const buildFallbackCoach = (payload) => {
   const isWorsening = trend === "worsening";
   const longSlouch = slouchDurationSec >= 1800;
   const manyCorrections = correctionsToday >= 15;
+  const historyWorsening = hasHistory && slouch7 >= slouch30 + 5;
+  const historyImproving = hasHistory && slouch30 >= slouch7 + 5;
 
   if (isSlouching && isWorsening) {
     return {
@@ -242,14 +259,47 @@ const buildFallbackCoach = (payload) => {
     };
   }
 
-  if (isSlouching || longSlouch) {
+  if (historyWorsening) {
     return {
       messageType: "insight",
       riskLevel: "low",
       reply:
-        "A long slouch period can overload your neck and lower back. Small frequent posture resets work better than one big correction.",
+        `Your recent trend is worse than your monthly baseline (${slouch7}% slouch in the last 7 days vs ${slouch30}% in 30 days). Let's tighten your daily reset routine.`,
       suggestedAction:
-        "Set a reminder every 20-30 minutes: chin tucked, ribs stacked over hips, and both feet grounded.",
+        "Add a 90-second posture reset every 20 minutes and stand for at least 3 minutes each hour.",
+    };
+  }
+
+  if (historyImproving) {
+    return {
+      messageType: "reinforcement",
+      riskLevel: "low",
+      reply:
+        `Good progress: your last 7-day slouch ratio (${slouch7}%) is better than your 30-day trend (${slouch30}%). Keep this consistency.`,
+      suggestedAction:
+        "Continue your current routine and add one short mobility drill at mid-day to lock in gains.",
+    };
+  }
+
+  if (setupQuestion) {
+    return {
+      messageType: "action",
+      riskLevel: "low",
+      reply:
+        "A better desk setup can reduce slouching quickly. Keep elbows near 90 degrees, top of screen at eye level, and back supported.",
+      suggestedAction:
+        "Adjust chair height so feet stay flat, then move screen to arm's length and eye level.",
+    };
+  }
+
+  if (painMention) {
+    return {
+      messageType: "insight",
+      riskLevel: "low",
+      reply:
+        "Pain usually increases when posture is static too long. Frequent low-effort movement is safer than forcing one perfect posture all day.",
+      suggestedAction:
+        "Do a 2-minute break now: stand, shoulder rolls, gentle neck range, then sit with ribs stacked over hips.",
     };
   }
 
@@ -261,6 +311,28 @@ const buildFallbackCoach = (payload) => {
         "Great effort today. High correction count means you are building awareness, which is the first step to better posture habits.",
       suggestedAction:
         "Keep the same routine and add one short chest-opening stretch after each study block.",
+    };
+  }
+
+  if (longSlouch) {
+    return {
+      messageType: "insight",
+      riskLevel: "low",
+      reply:
+        "You stayed in a poor posture for a long period. Small frequent posture resets work better than one big correction.",
+      suggestedAction:
+        "Set a reminder every 20-30 minutes: chin tucked, ribs stacked over hips, and both feet grounded.",
+    };
+  }
+
+  if (isSlouching) {
+    return {
+      messageType: "action",
+      riskLevel: "low",
+      reply:
+        "Current posture suggests slouching. One immediate reset can reduce load on your neck and lower back.",
+      suggestedAction:
+        "Reset now: feet flat, hips back, shoulders down, and take 5 slow breaths before continuing.",
     };
   }
 
