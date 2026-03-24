@@ -38,8 +38,8 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
     super.dispose();
   }
 
-  Future<void> sendMessage() async {
-    final text = inputController.text.trim();
+  Future<void> sendMessage([String? presetText]) async {
+    final text = (presetText ?? inputController.text).trim();
     if (text.isEmpty || isSending) {
       return;
     }
@@ -49,7 +49,9 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
       isSending = true;
     });
 
-    inputController.clear();
+    if (presetText == null) {
+      inputController.clear();
+    }
     _scrollToBottom();
 
     final postureState = _derivePostureState();
@@ -88,6 +90,13 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
         final source = (decoded['source'] as String? ?? '').toLowerCase();
         final coach = decoded['coach'];
         final reply = coach is Map<String, dynamic> ? (coach['reply'] as String? ?? '') : '';
+        final options = coach is Map<String, dynamic>
+            ? ((coach['options'] as List?)
+                      ?.map((item) => item?.toString() ?? '')
+                      .where((item) => item.trim().isNotEmpty)
+                      .toList() ??
+                  const <String>[])
+            : const <String>[];
 
         setState(() {
           messages.add(
@@ -96,6 +105,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
               text: source == 'unavailable'
                   ? _serverUnavailableMessage
                   : (reply.isNotEmpty ? reply : _serverUnavailableMessage),
+              options: options,
             ),
           );
         });
@@ -216,13 +226,33 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
                             ),
                         ],
                       ),
-                      child: Text(
-                        msg.text,
-                        style: TextStyle(
-                          color: isUser ? Colors.white : null,
-                          fontSize: 14,
-                          height: 1.35,
-                        ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            msg.text,
+                            style: TextStyle(
+                              color: isUser ? Colors.white : null,
+                              fontSize: 14,
+                              height: 1.35,
+                            ),
+                          ),
+                          // Quick options from coach response.
+                          if (!isUser && msg.options.isNotEmpty) ...[
+                            const SizedBox(height: 10),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: msg.options.map((option) {
+                                return ActionChip(
+                                  label: Text(option),
+                                  onPressed: isSending ? null : () => sendMessage(option),
+                                );
+                              }).toList(),
+                            ),
+                          ],
+                        ],
                       ),
                     ),
                   );
@@ -290,6 +320,7 @@ enum _Sender { user, coach }
 class _ChatMessage {
   final _Sender sender;
   final String text;
+  final List<String> options;
 
-  _ChatMessage({required this.sender, required this.text});
+  _ChatMessage({required this.sender, required this.text, this.options = const []});
 }

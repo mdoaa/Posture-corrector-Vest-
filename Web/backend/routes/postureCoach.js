@@ -9,9 +9,71 @@ const MAX_MESSAGE_LENGTH = 700;
 const MAX_HISTORY_ITEMS = 12;
 const RATE_WINDOW_MS = 60 * 1000;
 const RATE_LIMIT_COUNT = 20;
+const AGGREGATED_FETCH_TIMEOUT_MS = 4500;
 
 const requestBuckets = new Map();
 const DEFAULT_SINGLE_USER_ID = "vest-single-user";
+
+const detectLanguageHint = (text) => {
+  const input = String(text || "").trim();
+  if (!input) return "same-as-user";
+
+  // Arabic Unicode block detection.
+  if (/[\u0600-\u06FF]/.test(input)) return "arabic";
+  return "english";
+};
+
+const getRequestOrigin = (req) => {
+  const forwardedProtoRaw = req.headers["x-forwarded-proto"];
+  const forwardedProto = Array.isArray(forwardedProtoRaw)
+    ? forwardedProtoRaw[0]
+    : String(forwardedProtoRaw || "").split(",")[0].trim();
+  const proto = sanitizeText(forwardedProto, 10) || sanitizeText(req.protocol, 10) || "http";
+  const host = sanitizeText(req.get("host"), 300);
+  if (!host) return "";
+  return `${proto}://${host}`;
+};
+
+const fetchAggregatedContext = async (req) => {
+  const origin = getRequestOrigin(req);
+  const envBase = sanitizeText(process.env.PUBLIC_BASE_URL, 300);
+  const candidates = [
+    origin ? `${origin}/sensor/aggregated` : "",
+    origin ? `${origin}/sensorHistory/aggregated` : "",
+    envBase ? `${envBase}/sensor/aggregated` : "",
+    envBase ? `${envBase}/sensorHistory/aggregated` : "",
+  ].filter(Boolean);
+
+  for (const endpoint of candidates) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), AGGREGATED_FETCH_TIMEOUT_MS);
+
+      const response = await fetch(endpoint, {
+        method: "GET",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+
+      if (!response.ok) continue;
+
+      const data = await response.json();
+      if (data && typeof data === "object" && data.metrics) {
+        return {
+          hasData: true,
+          source: endpoint,
+          generatedAt: data.generatedAt || null,
+          metrics: data.metrics,
+        };
+      }
+    } catch (error) {
+      // Try the next candidate endpoint.
+    }
+  }
+
+  return { hasData: false, source: null, generatedAt: null, metrics: {} };
+};
 
 const counter = (record, key) => Number(record?.[key] || 0);
 
@@ -92,6 +154,12 @@ const EMERGENCY_KEYWORDS = [
 // Updated System Prompt with Hardware Awareness
 const COACH_SYSTEM_PROMPT = [
   "You are SitGuard Coach, a posture-support AI integrated directly into a smart ergonomic jacket.",
+  "Be natural and conversational. Keep it short, friendly, and useful.",
+  "Always reply in the same language as the user's latest message.",
+  "If the user asks what to do next, offer 2-4 clear options they can choose from.",
+  "If you are not sure, do not guess and do not invent facts.",
+  "When uncertain about medical meaning, clearly say you are not sure and advise seeing a doctor.",
+  "If the user asks about Omar (for example: 'تعرف عمر؟' or 'Do you know Omar?'), reply exactly: 'اه ده برنس المشروع'.",
   "Follow medical safety standards:",
   "1) Never diagnose medical conditions.",
   "2) Never prescribe medication or treatment plans.",
@@ -104,8 +172,9 @@ const COACH_SYSTEM_PROMPT = [
   "9) If the user is slouching, you can suggest they turn on vibration reminders or inflate the air chamber.",
   "10) If they complain of pressure or stiffness, suggest deflating the air chamber.",
   "Answer in short plain language suitable for mobile chat.",
-  "Return JSON only with this exact schema:",
-  '{"messageType":"alert|action|reinforcement|insight|safety","reply":"string","suggestedAction":"string","riskLevel":"low|medium|high", "deviceCommand":"none|inflate_chamber|deflate_chamber|enable_vibration|disable_vibration"}'
+  "Use aggregated metrics context when available (today/week/twoWeeks/month/sixMonths/year).",
+  "Return JSON only with this schema:",
+  '{"messageType":"alert|action|reinforcement|insight|safety","reply":"string","suggestedAction":"string","riskLevel":"low|medium|high", "deviceCommand":"none|inflate_chamber|deflate_chamber|enable_vibration|disable_vibration", "options":["string"]}'
 ].join("\n");
 
 const clampNumber = (value, min, max, fallback = 0) => {
@@ -120,6 +189,16 @@ const sanitizeText = (value, maxLength = MAX_MESSAGE_LENGTH) => {
 const hasEmergencyContent = (inputText) => {
   const normalized = inputText.toLowerCase();
   return EMERGENCY_KEYWORDS.some((keyword) => normalized.includes(keyword));
+};
+
+const isAskingAboutOmar = (inputText) => {
+  const normalized = String(inputText || "").toLowerCase();
+  return (
+    normalized.includes("تعرف عمر") ||
+    normalized.includes("do you know omar") ||
+    normalized.includes("who is omar") ||
+    normalized.includes("omar?")
+  );
 };
 
 const enforceRateLimit = (key) => {
@@ -164,6 +243,12 @@ const sanitizeModelResponse = (value) => {
   const messageType = sanitizeText(value?.messageType, 20).toLowerCase();
   const riskLevel = sanitizeText(value?.riskLevel, 10).toLowerCase();
   const deviceCommand = sanitizeText(value?.deviceCommand, 25).toLowerCase();
+  const options = Array.isArray(value?.options)
+    ? value.options
+        .map((item) => sanitizeText(String(item), 100))
+        .filter(Boolean)
+        .slice(0, 4)
+    : [];
 
   return {
     messageType: validTypes.has(messageType) ? messageType : "insight",
@@ -171,6 +256,7 @@ const sanitizeModelResponse = (value) => {
     deviceCommand: validCommands.has(deviceCommand) ? deviceCommand : "none",
     reply: sanitizeText(value?.reply, 500) || "Keep up the focus on your posture.",
     suggestedAction: sanitizeText(value?.suggestedAction, 220) || "Adjust your position if needed.",
+    options,
   };
 };
 
@@ -233,7 +319,7 @@ router.get("/api/posture-coach/health", (req, res) => {
 });
 
 router.post("/api/posture-coach/chat", async (req, res) => {
-  const userId = DEFAULT_SINGLE_USER_ID;
+  const userId = sanitizeText(req.body?.userId, 120) || DEFAULT_SINGLE_USER_ID;
   const ip = sanitizeText(req.ip, 64) || "unknown";
   const rateKey = `${userId}:${ip}`;
 
@@ -262,6 +348,8 @@ router.post("/api/posture-coach/chat", async (req, res) => {
     ? req.body.history.slice(-MAX_HISTORY_ITEMS).map((item) => sanitizeText(String(item), 200)).filter(Boolean)
     : [];
 
+  const languageHint = detectLanguageHint(message || history[history.length - 1] || "");
+
   if (!message && !req.body?.postureState) {
     return res.status(400).json({
       error: "Validation error",
@@ -270,6 +358,26 @@ router.post("/api/posture-coach/chat", async (req, res) => {
   }
 
   const emergencyText = `${message} ${trend}`.trim();
+
+  if (isAskingAboutOmar(message)) {
+    return res.status(200).json({
+      source: "policy",
+      coach: {
+        messageType: "reinforcement",
+        riskLevel: "low",
+        deviceCommand: "none",
+        reply: "اه ده برنس المشروع",
+        suggestedAction: "اسألني أي حاجة تانية عن القعدة أو الجهاز.",
+        options: [
+          "اعمل لي تحليل سريع لآخر أسبوع",
+          "إزاي أقلل الـ slouching؟",
+          "هل أفعّل vibration ولا air chamber؟",
+        ],
+      },
+      medicalNotice: "This assistant supports posture wellness and education only, not diagnosis or treatment.",
+    });
+  }
+
   if (hasEmergencyContent(emergencyText) || discomfortLevel >= 8) {
     return res.status(200).json({
       source: "safety",
@@ -285,10 +393,17 @@ router.post("/api/posture-coach/chat", async (req, res) => {
   }
 
   let historyContext = { hasData: false, totalRecords: 0 };
+  let aggregatedContext = { hasData: false, source: null, generatedAt: null, metrics: {} };
   try {
     historyContext = await buildSingleVestHistoryContext();
   } catch (error) {
     console.error("Failed to build vest history context:", error.message);
+  }
+
+  try {
+    aggregatedContext = await fetchAggregatedContext(req);
+  } catch (error) {
+    console.error("Failed to fetch aggregated context:", error.message);
   }
 
   const payload = {
@@ -300,8 +415,10 @@ router.post("/api/posture-coach/chat", async (req, res) => {
     discomfortLevel,
     message,
     hardwareState, // Injecting hardware context for the AI
+    languageHint,
     history,
     vestHistoryContext: historyContext,
+    aggregatedSensorContext: aggregatedContext,
     objective: "coach user on safer daily posture habits using the smart jacket features",
   };
 
