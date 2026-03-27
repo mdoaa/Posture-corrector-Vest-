@@ -61,8 +61,8 @@ const fetchAggregatedContext = async (req) => {
   const origin = getRequestOrigin(req);
   const envBase = sanitizeText(process.env.PUBLIC_BASE_URL, 300);
   const candidates = [
-    origin ? `${origin}/sensorHistory/aggregeted` : "",
-    envBase ? `${envBase}/sensorHistory/aggregeted` : "",
+    origin ? `${origin}/sensorHistory/aggregated` : "",
+    envBase ? `${envBase}/sensorHistory/aggregated` : "",
   ].filter(Boolean);
 
   for (const endpoint of candidates) {

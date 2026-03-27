@@ -65,7 +65,7 @@ const computeTransitionAndDuration = ({ records, baselineState, field, rangeStar
 
 const preaggregationCache = {
     generatedAt: null,
-    aggregetedMetrics: null,
+    aggregatedMetrics: null,
     cachedAtMs: 0,
     expiresAtMs: 0,
 };
@@ -179,7 +179,7 @@ const buildHistoryWindowAggregate = async (days) => {
     };
 };
 
-const buildAggregetedMetricsPayload = async () => {
+const buildAggregatedMetricsPayload = async () => {
     const windows = await Promise.all(
         WINDOW_DEFINITIONS.map(async (windowDef) => {
             const summary = await buildHistoryWindowAggregate(windowDef.days);
@@ -192,7 +192,7 @@ const buildAggregetedMetricsPayload = async () => {
 
 const refreshPreaggregationCache = async ({ force = false } = {}) => {
     const now = Date.now();
-    const hasFreshCache = preaggregationCache.aggregetedMetrics && preaggregationCache.expiresAtMs > now;
+    const hasFreshCache = preaggregationCache.aggregatedMetrics && preaggregationCache.expiresAtMs > now;
 
     if (!force && hasFreshCache) {
         return preaggregationCache;
@@ -203,13 +203,13 @@ const refreshPreaggregationCache = async ({ force = false } = {}) => {
     }
 
     preaggregationRefreshPromise = (async () => {
-        const aggregetedMetrics = await buildAggregetedMetricsPayload();
+        const aggregatedMetrics = await buildAggregatedMetricsPayload();
 
         const generatedAt = new Date().toISOString();
         const cachedAtMs = Date.now();
 
         preaggregationCache.generatedAt = generatedAt;
-        preaggregationCache.aggregetedMetrics = aggregetedMetrics;
+        preaggregationCache.aggregatedMetrics = aggregatedMetrics;
         preaggregationCache.cachedAtMs = cachedAtMs;
         preaggregationCache.expiresAtMs = cachedAtMs + PREAGGREGATION_TTL_MS;
 
@@ -231,7 +231,7 @@ const getPreaggregatedPayload = async () => {
     if (hasAnyCache && isFresh) {
         return {
             generatedAt: preaggregationCache.generatedAt,
-            metrics: preaggregationCache.aggregetedMetrics,
+            metrics: preaggregationCache.aggregatedMetrics,
         };
     }
 
@@ -242,14 +242,14 @@ const getPreaggregatedPayload = async () => {
 
         return {
             generatedAt: preaggregationCache.generatedAt,
-            metrics: preaggregationCache.aggregetedMetrics,
+            metrics: preaggregationCache.aggregatedMetrics,
         };
     }
 
     const cache = await refreshPreaggregationCache({ force: true });
     return {
         generatedAt: cache.generatedAt,
-        metrics: cache.aggregetedMetrics,
+        metrics: cache.aggregatedMetrics,
     };
 };
 
@@ -318,16 +318,6 @@ const getSensorRoutes = (io) => {
         } catch (err) {
             console.error('Error fetching sensor history:', err);
             res.status(500).json({ error: 'error fetching sensor history from database' });
-        }
-    });
-
-    router.get('/sensorHistory/aggregeted', async (req, res) => {
-        try {
-            const payload = await getPreaggregatedPayload();
-            return res.status(200).json(payload);
-        } catch (err) {
-            console.error('Error fetching aggregeted sensor history:', err);
-            return res.status(500).json({ error: 'error fetching aggregeted sensor history from database' });
         }
     });
 

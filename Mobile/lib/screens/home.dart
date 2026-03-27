@@ -54,10 +54,12 @@ class Home extends StatelessWidget {
           ),
         ],
       ),
-      // body:
-      //     Center(),
-      body: Obx(() => bottomNavController.currentPage),
-      // to display the current page depending on the index  of the bottom navigator button that is selected
+      body: Obx(
+        () => IndexedStack(
+          index: bottomNavController.curIndex.value,
+          children: bottomNavController.pages,
+        ),
+      ),
     );
   }
 }

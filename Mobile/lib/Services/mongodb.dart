@@ -485,16 +485,13 @@ class Mongodb {
     return decodedData;
   }
 
-  /// Fetch today's aggregated metrics from /sensorHistory/aggregeted.
+  /// Fetch today's aggregated metrics from /sensorHistory/aggregated.
   /// Returns keys: normalCount, slouchyCount,
   /// vibrationActiveDurationSec, airChamberActiveDurationSec.
   static Future<Map<String, int>> fetchTodayAggregatedWindow() async {
     final endpoints = [
-      '$baseUrl/sensorHistory/aggregeted',
       '$baseUrl/sensorHistory/aggregated',
-      '$baseUrl/api/sensorHistory/aggregeted',
       '$baseUrl/api/sensorHistory/aggregated',
-      '$baseUrl/api/sensor/history/aggregeted',
       '$baseUrl/api/sensor/history/aggregated',
     ];
 
@@ -533,16 +530,12 @@ class Mongodb {
     };
   }
 
-  /// Fetch all aggregated windows from /sensorHistory/aggregeted.
+  /// Fetch all aggregated windows from /sensorHistory/aggregated.
   /// Returns a map keyed by: today, week, twoWeeks, month, sixMonths, year.
   static Future<Map<String, Map<String, int>>> fetchAggregatedMetrics() async {
     final endpoints = [
-      '$baseUrl/sensorHistory/aggregeted',
       '$baseUrl/sensorHistory/aggregated',
-      '$baseUrl/api/sensorHistory/aggregeted',
       '$baseUrl/api/sensorHistory/aggregated',
-      '$baseUrl/api/sensor/history/aggregeted',
-      '$baseUrl/api/sensor/history/aggregated',
     ];
 
     for (final endpoint in endpoints) {
