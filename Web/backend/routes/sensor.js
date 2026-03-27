@@ -11,7 +11,6 @@ const WINDOW_DEFINITIONS = [
     { key: 'year', days: 365 },
 ];
 
-const AGGREGETED_WINDOWS = [7, 14, 30, 180, 365];
 const PREAGGREGATION_TTL_MS = 60 * 1000;
 
 const toNumber = (value) => Number(value || 0);
@@ -22,16 +21,8 @@ const toIsoOrNull = (value) => {
     return Number.isNaN(date.getTime()) ? null : date.toISOString();
 };
 
-const toValidTime = (value) => {
-    if (!value) return null;
-    const date = new Date(value);
-    const time = date.getTime();
-    return Number.isNaN(time) ? null : time;
-};
-
 const preaggregationCache = {
     generatedAt: null,
-    aggregatedMetrics: null,
     aggregetedMetrics: null,
     cachedAtMs: 0,
     expiresAtMs: 0,
@@ -40,22 +31,17 @@ const preaggregationCache = {
 let preaggregationRefreshPromise = null;
 let preaggregationSchedulerStarted = false;
 
-const buildWindowAggregate = async (days) => {
+const buildHistoryWindowAggregate = async (days) => {
     const now = new Date();
     const rangeStart = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
 
-    const [latestInRangeHistory, baselineBeforeRangeHistory, latestInRangeSensor, baselineBeforeRangeSensor, rangeSensorRecords] = await Promise.all([
+    const [latestInRangeHistory, baselineBeforeRangeHistory, recordsInRange] = await Promise.all([
         SitxHistory.findOne({ receivedAt: { $gte: rangeStart } }).sort({ receivedAt: -1 }).lean(),
         SitxHistory.findOne({ receivedAt: { $lt: rangeStart } }).sort({ receivedAt: -1 }).lean(),
-        SitxSensor.findOne({ receivedAt: { $gte: rangeStart } }).sort({ receivedAt: -1 }).lean(),
-        SitxSensor.findOne({ receivedAt: { $lt: rangeStart } }).sort({ receivedAt: -1 }).lean(),
-        SitxSensor.find(
-            { receivedAt: { $gte: rangeStart } },
-            { a: 1, b: 1, c: 1, receivedAt: 1 }
-        ).sort({ receivedAt: 1 }).lean(),
+        SitxHistory.countDocuments({ receivedAt: { $gte: rangeStart } }),
     ]);
 
-    if (!latestInRangeHistory && !latestInRangeSensor) {
+    if (!latestInRangeHistory) {
         return {
             days,
             from: rangeStart.toISOString(),
@@ -73,98 +59,31 @@ const buildWindowAggregate = async (days) => {
         };
     }
 
-    const normalCount = latestInRangeHistory
-        ? Math.max(0, toNumber(latestInRangeHistory.h) - toNumber(baselineBeforeRangeHistory?.h))
-        : 0;
-    const slouchyCount = latestInRangeHistory
-        ? Math.max(0, toNumber(latestInRangeHistory.i) - toNumber(baselineBeforeRangeHistory?.i))
-        : 0;
-
-    let vibrationActiveMs = 0;
-    let airChamberActiveMs = 0;
-    let valveOpenMs = 0;
-
-    const rangeStartMs = rangeStart.getTime();
-    const nowMs = now.getTime();
-
-    let isVibrationEnabled = Boolean(baselineBeforeRangeSensor?.c);
-    let isPumpRunning = Boolean(baselineBeforeRangeSensor?.b);
-    let isValveOpen = Boolean(baselineBeforeRangeSensor?.a);
-
-    let cursorMs = rangeStartMs;
-
-    // --- الإضافة الجديدة: الحد الأقصى للوقت المسموح به (5 دقائق) ---
-    const MAX_VALID_DURATION_MS = 5 * 60 * 1000; 
-
-    for (const record of rangeSensorRecords) {
-        const recordMs = toValidTime(record?.receivedAt);
-        if (recordMs === null) {
-            continue;
-        }
-
-        const boundedRecordMs = Math.min(Math.max(recordMs, rangeStartMs), nowMs);
-        const deltaMs = Math.max(0, boundedRecordMs - cursorMs);
-
-        // --- اللوجيك الجديد: لو الفارق أكتر من 5 دقايق، متضيفش الوقت ---
-        // ملاحظة: لو حابب تحسب الـ 5 دقايق وترمي الباقي بدل ما تصفرها خالص، استخدم:
-        // const effectiveDeltaMs = Math.min(deltaMs, MAX_VALID_DURATION_MS);
-        const effectiveDeltaMs = deltaMs > MAX_VALID_DURATION_MS ? 0 : deltaMs;
-
-        if (isVibrationEnabled) vibrationActiveMs += effectiveDeltaMs;
-        if (isPumpRunning) airChamberActiveMs += effectiveDeltaMs;
-        if (isValveOpen) valveOpenMs += effectiveDeltaMs;
-
-        isVibrationEnabled = Boolean(record?.c);
-        isPumpRunning = Boolean(record?.b);
-        isValveOpen = Boolean(record?.a);
-        cursorMs = boundedRecordMs;
-    }
-
-    // --- تطبيق اللوجيك على الوقت المتبقي في النهاية ---
-    const tailMs = Math.max(0, nowMs - cursorMs);
-    const effectiveTailMs = tailMs > MAX_VALID_DURATION_MS ? 0 : tailMs;
-
-    if (isVibrationEnabled) vibrationActiveMs += effectiveTailMs;
-    if (isPumpRunning) airChamberActiveMs += effectiveTailMs;
-    if (isValveOpen) valveOpenMs += effectiveTailMs;
-
-    const vibrationActiveDurationSec = Math.floor(vibrationActiveMs / 1000);
-    const airChamberActiveDurationSec = Math.floor(airChamberActiveMs / 1000);
-    const valveOpenDurationSec = Math.floor(valveOpenMs / 1000);
+    const normalCount = Math.max(0, toNumber(latestInRangeHistory.h) - toNumber(baselineBeforeRangeHistory?.h));
+    const slouchyCount = Math.max(0, toNumber(latestInRangeHistory.i) - toNumber(baselineBeforeRangeHistory?.i));
 
     return {
         days,
         from: rangeStart.toISOString(),
         to: now.toISOString(),
-        latestAt: toIsoOrNull((latestInRangeSensor || latestInRangeHistory)?.receivedAt),
-        recordsInRange: rangeSensorRecords.length,
+        latestAt: toIsoOrNull(latestInRangeHistory?.receivedAt),
+        recordsInRange,
         normalCount,
         slouchyCount,
-        vibrationOpenedCount: vibrationActiveDurationSec,
-        airChamberOpenedCount: airChamberActiveDurationSec,
-        valveOpenedCount: valveOpenDurationSec,
-        vibrationActiveDurationSec,
-        airChamberActiveDurationSec,
-        valveOpenDurationSec,
+        vibrationOpenedCount: 0,
+        airChamberOpenedCount: 0,
+        valveOpenedCount: 0,
+        vibrationActiveDurationSec: 0,
+        airChamberActiveDurationSec: 0,
+        valveOpenDurationSec: 0,
     };
-};
-
-const buildAggregatedMetricsPayload = async () => {
-    const windows = await Promise.all(
-        WINDOW_DEFINITIONS.map(async (windowDef) => {
-            const summary = await buildWindowAggregate(windowDef.days);
-            return [windowDef.key, summary];
-        })
-    );
-
-    return Object.fromEntries(windows);
 };
 
 const buildAggregetedMetricsPayload = async () => {
     const windows = await Promise.all(
-        AGGREGETED_WINDOWS.map(async (days) => {
-            const summary = await buildWindowAggregate(days);
-            return [`day${days}`, summary];
+        WINDOW_DEFINITIONS.map(async (windowDef) => {
+            const summary = await buildHistoryWindowAggregate(windowDef.days);
+            return [windowDef.key, summary];
         })
     );
 
@@ -173,7 +92,7 @@ const buildAggregetedMetricsPayload = async () => {
 
 const refreshPreaggregationCache = async ({ force = false } = {}) => {
     const now = Date.now();
-    const hasFreshCache = preaggregationCache.aggregatedMetrics && preaggregationCache.expiresAtMs > now;
+    const hasFreshCache = preaggregationCache.aggregetedMetrics && preaggregationCache.expiresAtMs > now;
 
     if (!force && hasFreshCache) {
         return preaggregationCache;
@@ -184,16 +103,12 @@ const refreshPreaggregationCache = async ({ force = false } = {}) => {
     }
 
     preaggregationRefreshPromise = (async () => {
-        const [aggregatedMetrics, aggregetedMetrics] = await Promise.all([
-            buildAggregatedMetricsPayload(),
-            buildAggregetedMetricsPayload(),
-        ]);
+        const aggregetedMetrics = await buildAggregetedMetricsPayload();
 
         const generatedAt = new Date().toISOString();
         const cachedAtMs = Date.now();
 
         preaggregationCache.generatedAt = generatedAt;
-        preaggregationCache.aggregatedMetrics = aggregatedMetrics;
         preaggregationCache.aggregetedMetrics = aggregetedMetrics;
         preaggregationCache.cachedAtMs = cachedAtMs;
         preaggregationCache.expiresAtMs = cachedAtMs + PREAGGREGATION_TTL_MS;
@@ -208,7 +123,7 @@ const refreshPreaggregationCache = async ({ force = false } = {}) => {
     }
 };
 
-const getPreaggregatedPayload = async (type) => {
+const getPreaggregatedPayload = async () => {
     const now = Date.now();
     const hasAnyCache = Boolean(preaggregationCache.generatedAt);
     const isFresh = preaggregationCache.expiresAtMs > now;
@@ -216,9 +131,7 @@ const getPreaggregatedPayload = async (type) => {
     if (hasAnyCache && isFresh) {
         return {
             generatedAt: preaggregationCache.generatedAt,
-            metrics: type === 'aggregeted'
-                ? preaggregationCache.aggregetedMetrics
-                : preaggregationCache.aggregatedMetrics,
+            metrics: preaggregationCache.aggregetedMetrics,
         };
     }
 
@@ -229,18 +142,14 @@ const getPreaggregatedPayload = async (type) => {
 
         return {
             generatedAt: preaggregationCache.generatedAt,
-            metrics: type === 'aggregeted'
-                ? preaggregationCache.aggregetedMetrics
-                : preaggregationCache.aggregatedMetrics,
+            metrics: preaggregationCache.aggregetedMetrics,
         };
     }
 
     const cache = await refreshPreaggregationCache({ force: true });
     return {
         generatedAt: cache.generatedAt,
-        metrics: type === 'aggregeted'
-            ? cache.aggregetedMetrics
-            : cache.aggregatedMetrics,
+        metrics: cache.aggregetedMetrics,
     };
 };
 
@@ -314,7 +223,7 @@ const getSensorRoutes = (io) => {
 
     router.get('/sensorHistory/aggregeted', async (req, res) => {
         try {
-            const payload = await getPreaggregatedPayload('aggregeted');
+            const payload = await getPreaggregatedPayload();
             return res.status(200).json(payload);
         } catch (err) {
             console.error('Error fetching aggregeted sensor history:', err);
@@ -322,59 +231,7 @@ const getSensorRoutes = (io) => {
         }
     });
 
-    router.get('/sensorHistory/summary', async (req, res) => {
-        try {
-            const parsedDays = Number.parseInt(req.query.days, 10);
-            const days = Number.isNaN(parsedDays) ? 7 : Math.min(Math.max(parsedDays, 1), 30);
-            const rangeStart = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-
-            const [latest, baseline] = await Promise.all([
-                SitxHistory.findOne().sort({ receivedAt: -1 }).lean(),
-                SitxHistory.findOne({ receivedAt: { $lt: rangeStart } }).sort({ receivedAt: -1 }).lean(),
-            ]);
-
-            if (!latest) {
-                return res.status(404).json({ error: 'No sensor history found' });
-            }
-
-            const summary = {
-                days,
-                rangeStart,
-                latestAt: latest.receivedAt,
-                slouchy: Math.max(0, toNumber(latest.i) - toNumber(baseline?.i)),
-                left: Math.max(0, toNumber(latest.g) - toNumber(baseline?.g)),
-                right: Math.max(0, toNumber(latest.f) - toNumber(baseline?.f)),
-                normal: Math.max(0, toNumber(latest.h) - toNumber(baseline?.h)),
-            };
-
-            res.status(200).json(summary);
-        } catch (err) {
-            console.error('Error fetching sensor history summary:', err);
-            res.status(500).json({ error: 'error fetching sensor history summary from database' });
-        }
-    });
-
-    router.get('/sensor/aggregated', async (req, res) => {
-        try {
-            const payload = await getPreaggregatedPayload('aggregated');
-            return res.status(200).json(payload);
-        } catch (err) {
-            console.error('Error fetching aggregated sensor data:', err);
-            return res.status(500).json({ error: 'error fetching aggregated sensor data from database' });
-        }
-    });
-
-    router.get('/sensorHistory/aggregated', async (req, res) => {
-        try {
-            const payload = await getPreaggregatedPayload('aggregated');
-            return res.status(200).json(payload);
-        } catch (err) {
-            console.error('Error fetching aggregated sensor history:', err);
-            return res.status(500).json({ error: 'error fetching aggregated sensor history from database' });
-        }
-    });
-
     return router;
 };
-  
+
 export default getSensorRoutes;

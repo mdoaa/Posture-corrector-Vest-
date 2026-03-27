@@ -34,6 +34,9 @@ const parseCsvEnv = (value) =>
     .map((item) => item.trim())
     .filter(Boolean);
 
+const isLocalDevOrigin = (origin) =>
+  /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(String(origin || ""));
+
 const allowedOrigins = parseCsvEnv(process.env.ALLOWED_ORIGINS);
 const socketAllowedOrigins = parseCsvEnv(process.env.SOCKET_ALLOWED_ORIGINS);
 const resolvedSocketOrigins =
@@ -264,6 +267,16 @@ app.use(
     origin: (origin, callback) => {
       // Allow server-to-server and tools without an Origin header.
       if (!origin) {
+        return callback(null, true);
+      }
+
+      // If ALLOWED_ORIGINS is not configured, do not block requests.
+      if (allowedOrigins.length === 0) {
+        return callback(null, true);
+      }
+
+      // Always allow localhost during development to simplify local testing.
+      if (process.env.NODE_ENV !== "production" && isLocalDevOrigin(origin)) {
         return callback(null, true);
       }
 

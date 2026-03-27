@@ -9,7 +9,6 @@ enum DateRange { last7, last14, last18, last28 }
 class Sensors extends GetxController {
   late IO.Socket socket;
   Timer? _midnightResetTimer;
-  Timer? _sensorDataFetchTimer;
 
   RxInt sCount = 5.obs;
   RxInt rCount = 0.obs;
@@ -130,19 +129,8 @@ class Sensors extends GetxController {
     // Setup midnight reset
     _setupMidnightReset();
 
-    // Fetch latest snapshot and keep it refreshed from sensorData endpoint.
-    _startSensorDataFetching();
-  }
-
-  /// Start periodic fetching of the latest sensor snapshot.
-  void _startSensorDataFetching() {
+    // Initial snapshot fetch, then real-time updates come from socket events.
     _fetchAndProcessLatestSensorData();
-
-    _sensorDataFetchTimer = Timer.periodic(Duration(seconds: 10), (_) {
-      _fetchAndProcessLatestSensorData();
-    });
-
-    print('⏰ Started periodic sensorData fetching (every 10s)');
   }
 
   /// Fetch latest sensorData and update home stats.
@@ -358,7 +346,6 @@ class Sensors extends GetxController {
   @override
   void onClose() {
     _midnightResetTimer?.cancel();
-    _sensorDataFetchTimer?.cancel();
     socket.disconnect();
     super.onClose();
   }

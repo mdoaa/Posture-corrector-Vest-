@@ -388,14 +388,14 @@ class Mongodb {
     return {};
   }
 
-  /// Fetch today's aggregated metrics from /sensor/aggregated.
+  /// Fetch today's aggregated metrics from /sensorHistory/aggregeted.
   /// Returns keys: normalCount, slouchyCount,
   /// vibrationActiveDurationSec, airChamberActiveDurationSec.
   static Future<Map<String, int>> fetchTodayAggregatedWindow() async {
     final endpoints = [
-      '$baseUrl/sensor/aggregated',
-      '$baseUrl/api/sensor/aggregated',
-      '$baseUrl/api/sensor/data/aggregated',
+      '$baseUrl/sensorHistory/aggregeted',
+      '$baseUrl/api/sensorHistory/aggregeted',
+      '$baseUrl/api/sensor/history/aggregeted',
     ];
 
     for (final endpoint in endpoints) {
@@ -458,13 +458,13 @@ class Mongodb {
     };
   }
 
-  /// Fetch all aggregated windows from /sensor/aggregated.
+  /// Fetch all aggregated windows from /sensorHistory/aggregeted.
   /// Returns a map keyed by: today, week, twoWeeks, month, sixMonths, year.
   static Future<Map<String, Map<String, int>>> fetchAggregatedMetrics() async {
     final endpoints = [
-      '$baseUrl/sensor/aggregated',
-      '$baseUrl/api/sensor/aggregated',
-      '$baseUrl/api/sensor/data/aggregated',
+      '$baseUrl/sensorHistory/aggregeted',
+      '$baseUrl/api/sensorHistory/aggregeted',
+      '$baseUrl/api/sensor/history/aggregeted',
     ];
 
     int parseInt(dynamic value) {

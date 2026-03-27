@@ -1,10 +1,20 @@
-import 'package:get/get.dart';
+import 'dart:async';
 
+import 'package:get/get.dart';
+import 'package:socket_io_client/socket_io_client.dart' as IO;
+
+import '../../config.dart';
 import '../../Services/mongodb.dart';
 
 enum DateRange { today, week, twoWeeks, month, sixMonths, year }
 
 class StateScreenController extends GetxController {
+  static const Duration _minRealtimeRefreshGap = Duration(seconds: 1);
+
+  late IO.Socket _socket;
+  bool _isFetching = false;
+  DateTime _lastRealtimeFetch = DateTime.fromMillisecondsSinceEpoch(0);
+
   Rx<DateRange> selectedRange = DateRange.today.obs;
   RxBool isLoading = true.obs;
 
@@ -30,9 +40,19 @@ class StateScreenController extends GetxController {
   void onInit() {
     super.onInit();
     fetchAllRanges();
+    _initSocketRealtime();
+  }
+
+  @override
+  void onClose() {
+    _socket.dispose();
+    super.onClose();
   }
 
   Future<void> fetchAllRanges() async {
+    if (_isFetching) return;
+    _isFetching = true;
+
     try {
       final aggregated = await Mongodb.fetchAggregatedMetrics();
 
@@ -53,8 +73,33 @@ class StateScreenController extends GetxController {
     } catch (e) {
       print('❌ Error fetching aggregated ranges: $e');
     } finally {
+      _isFetching = false;
       isLoading.value = false;
     }
+  }
+
+  void _initSocketRealtime() {
+    _socket = IO.io(
+      AppConfig.webSocketUrl,
+      Map<String, dynamic>.from(AppConfig.socketIOOptions),
+    );
+
+    _socket.onConnect((_) {
+      print('🟢 State screen socket connected');
+    });
+
+    _socket.on('sensorData', (_) {
+      final now = DateTime.now();
+      if (now.difference(_lastRealtimeFetch) < _minRealtimeRefreshGap) {
+        return;
+      }
+      _lastRealtimeFetch = now;
+      fetchAllRanges();
+    });
+
+    _socket.onDisconnect((_) {
+      print('🔴 State screen socket disconnected');
+    });
   }
 
   void changeRange(DateRange newRange) {
