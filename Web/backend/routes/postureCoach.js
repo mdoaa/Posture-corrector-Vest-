@@ -585,13 +585,18 @@ const generateCoachReply = async (aiConfig, payload) => {
   return parsed;
 };
 
-// UPDATED: Lab UI with SitX specific fields
+// FIXED: Escaped \\n to prevent SyntaxErrors in the generated browser JS
 router.get("/posture-coach-lab", (req, res) => {
+  res.removeHeader("Content-Security-Policy");
+  res.removeHeader("X-Content-Security-Policy");
+  
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
   res.setHeader("Pragma", "no-cache");
   res.setHeader("Expires", "0");
+  
   const labBuildTag = new Date().toISOString();
+  
   res.send(`<!doctype html>
 <html lang="en">
   <head>
@@ -601,249 +606,133 @@ router.get("/posture-coach-lab", (req, res) => {
     <style>
       :root {
         color-scheme: light;
-        --bg1: #f8f9ff;
-        --bg2: #edf2ff;
-        --surface: #ffffff;
-        --text: #1d2433;
-        --muted: #607086;
-        --userBubble: #7692ad;
-        --coachBubble: #ffffff;
-        --border: #d8e0eb;
-        --chip: #f0f4fb;
-        --chipBorder: #c9d4e3;
-        --send: #3e6e9a;
-        --sendDisabled: #a8b7c6;
-        --danger: #b00020;
+        --bg1: #f8f9ff; --bg2: #edf2ff; --surface: #ffffff;
+        --text: #1d2433; --muted: #607086;
+        --userBubble: #7692ad; --coachBubble: #ffffff;
+        --border: #d8e0eb; --chip: #f0f4fb; --chipBorder: #c9d4e3;
+        --send: #3e6e9a; --sendDisabled: #a8b7c6; --danger: #b00020;
       }
-
-      * {
-        box-sizing: border-box;
-      }
-
+      * { box-sizing: border-box; }
       body {
-        margin: 0;
-        min-height: 100vh;
+        margin: 0; min-height: 100vh;
         font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-        color: var(--text);
-        background: linear-gradient(165deg, var(--bg1), var(--bg2));
-        display: grid;
-        place-items: center;
-        padding: 14px;
+        color: var(--text); background: linear-gradient(165deg, var(--bg1), var(--bg2));
+        display: grid; place-items: center; padding: 14px;
       }
-
       .phone {
-        width: min(460px, 100%);
-        height: min(860px, 92vh);
-        background: var(--surface);
-        border: 1px solid var(--border);
-        border-radius: 24px;
-        overflow: hidden;
+        width: min(480px, 100%); height: min(900px, 95vh);
+        background: var(--surface); border: 1px solid var(--border);
+        border-radius: 24px; overflow: hidden;
         box-shadow: 0 24px 60px rgba(35, 52, 84, 0.2);
-        display: flex;
-        flex-direction: column;
+        display: flex; flex-direction: column;
       }
-
       .top {
-        padding: 14px 14px 10px;
-        border-bottom: 1px solid var(--border);
+        padding: 14px 14px 10px; border-bottom: 1px solid var(--border);
         background: linear-gradient(180deg, #f7f9fd 0%, #ffffff 100%);
       }
+      .title { font-size: 16px; font-weight: 700; margin: 0; }
+      .subtitle { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+      
+      .sim-panel { margin-top: 10px; font-size: 12px; background: #f0f4fb; border-radius: 8px; padding: 8px; border: 1px solid var(--border); }
+      .sim-panel summary { font-weight: bold; cursor: pointer; color: #3e6e9a; outline: none; margin-bottom: 8px; }
+      .sim-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+      .sim-grid label { display: flex; flex-direction: column; color: var(--muted); font-size: 11px; }
+      .sim-grid input, .sim-grid select { border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; font-size: 12px; }
+      .sim-grid .checkbox-label { flex-direction: row; align-items: center; gap: 4px; margin-top: 10px; color: var(--text); }
 
-      .title {
-        font-size: 16px;
-        font-weight: 700;
-        margin: 0;
-      }
-
-      .subtitle {
-        margin: 4px 0 0;
-        color: var(--muted);
-        font-size: 12px;
-      }
-
-      .metaRow {
-        margin-top: 10px;
-        display: grid;
-        grid-template-columns: 1fr;
-        gap: 8px;
-      }
-
-      .toggle {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 12px;
-        color: var(--muted);
-      }
-
-      .metaRow input {
-        width: 100%;
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        padding: 8px 10px;
-        font: inherit;
-      }
-
-      .status {
-        margin-top: 6px;
-        color: var(--muted);
-        font-size: 12px;
-      }
-
-      .chatList {
-        flex: 1;
-        overflow: auto;
-        padding: 12px;
-        background: #f7f9fc;
-      }
-
-      .bubbleWrap {
-        display: flex;
-        margin-bottom: 10px;
-      }
-
-      .bubbleWrap.user {
-        justify-content: flex-end;
-      }
-
-      .bubbleWrap.coach {
-        justify-content: flex-start;
-      }
-
+      .metaRow { margin-top: 10px; display: grid; grid-template-columns: 1fr; gap: 8px; }
+      .toggle { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+      .metaRow input.user-input { width: 100%; border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; font: inherit; }
+      .status { margin-top: 6px; color: var(--muted); font-size: 12px; }
+      
+      .chatList { flex: 1; overflow: auto; padding: 12px; background: #f7f9fc; }
+      .bubbleWrap { display: flex; margin-bottom: 10px; }
+      .bubbleWrap.user { justify-content: flex-end; }
+      .bubbleWrap.coach { justify-content: flex-start; }
       .bubble {
-        max-width: 78%;
-        border-radius: 14px;
-        padding: 10px 12px;
-        font-size: 14px;
-        line-height: 1.35;
-        box-shadow: 0 3px 8px rgba(18, 35, 62, 0.08);
-        white-space: pre-wrap;
-        word-break: break-word;
+        max-width: 78%; border-radius: 14px; padding: 10px 12px;
+        font-size: 14px; line-height: 1.35; box-shadow: 0 3px 8px rgba(18, 35, 62, 0.08);
+        white-space: pre-wrap; word-break: break-word;
       }
-
-      .bubbleWrap.user .bubble {
-        background: var(--userBubble);
-        color: #ffffff;
-      }
-
-      .bubbleWrap.coach .bubble {
-        background: var(--coachBubble);
-        border: 1px solid var(--border);
-      }
-
-      .chips {
-        margin-top: 8px;
-        display: flex;
-        flex-wrap: wrap;
-        gap: 6px;
-      }
-
+      .bubbleWrap.user .bubble { background: var(--userBubble); color: #ffffff; }
+      .bubbleWrap.coach .bubble { background: var(--coachBubble); border: 1px solid var(--border); }
+      .chips { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
       .chip {
-        border: 1px solid var(--chipBorder);
-        background: var(--chip);
-        border-radius: 999px;
-        padding: 6px 10px;
-        font-size: 12px;
-        cursor: pointer;
+        border: 1px solid var(--chipBorder); background: var(--chip);
+        border-radius: 999px; padding: 6px 10px; font-size: 12px; cursor: pointer;
       }
-
-      .chip:disabled {
-        opacity: 0.65;
-        cursor: default;
-      }
-
-      .bottom {
-        border-top: 1px solid var(--border);
-        background: #fff;
-        padding: 10px 12px 12px;
-      }
-
-      .composer {
-        display: flex;
-        gap: 8px;
-      }
-
+      .chip:disabled { opacity: 0.65; cursor: default; }
+      .bottom { border-top: 1px solid var(--border); background: #fff; padding: 10px 12px 12px; }
+      .composer { display: flex; gap: 8px; }
       textarea {
-        flex: 1;
-        resize: none;
-        min-height: 42px;
-        max-height: 110px;
-        border: 1px solid var(--border);
-        border-radius: 12px;
-        padding: 10px 11px;
-        font: inherit;
+        flex: 1; resize: none; min-height: 42px; max-height: 110px;
+        border: 1px solid var(--border); border-radius: 12px; padding: 10px 11px; font: inherit;
       }
-
-      textarea:focus,
-      input:focus {
-        outline: none;
-        border-color: #8aa7c3;
-        box-shadow: 0 0 0 3px rgba(103, 136, 168, 0.14);
-      }
-
+      textarea:focus, input:focus { outline: none; border-color: #8aa7c3; box-shadow: 0 0 0 3px rgba(103, 136, 168, 0.14); }
       button.send {
-        width: 48px;
-        height: 48px;
-        border: 0;
-        border-radius: 12px;
-        color: #fff;
-        background: var(--send);
-        font-size: 18px;
-        cursor: pointer;
+        width: 48px; height: 48px; border: 0; border-radius: 12px; color: #fff;
+        background: var(--send); font-size: 18px; cursor: pointer;
       }
-
-      button.send:disabled {
-        background: var(--sendDisabled);
-        cursor: default;
-      }
-
-      .err {
-        margin-top: 6px;
-        color: var(--danger);
-        font-size: 12px;
-        min-height: 16px;
-      }
-
-      .debug {
-        margin-top: 8px;
-        border-top: 1px dashed var(--border);
-        padding-top: 8px;
-      }
-
-      .debug details {
-        font-size: 12px;
-        color: var(--muted);
-      }
-
+      button.send:disabled { background: var(--sendDisabled); cursor: default; }
+      .err { margin-top: 6px; color: var(--danger); font-size: 12px; min-height: 16px; font-weight: bold; }
+      .debug { margin-top: 8px; border-top: 1px dashed var(--border); padding-top: 8px; }
+      .debug details { font-size: 12px; color: var(--muted); }
       .debug pre {
-        margin: 8px 0 0;
-        padding: 8px;
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        background: #fbfcff;
-        color: #2b3645;
-        overflow: auto;
-        max-height: 180px;
-        white-space: pre-wrap;
-        word-break: break-word;
+        margin: 8px 0 0; padding: 8px; border: 1px solid var(--border);
+        border-radius: 8px; background: #fbfcff; color: #2b3645; overflow: auto;
+        max-height: 180px; white-space: pre-wrap; word-break: break-word;
       }
     </style>
   </head>
   <body>
+    <noscript>
+      <div style="background: red; color: white; padding: 14px; text-align: center; font-weight: bold;">
+        ERROR: JavaScript is blocked!
+      </div>
+    </noscript>
     <div class="phone">
       <div class="top">
         <h1 class="title">SitX Coach Lab</h1>
-        <p class="subtitle">Mobile-like chat UI using the same payload fields as Flutter chat.</p>
-        <p class="subtitle">Build: ${labBuildTag}</p>
+        <p class="subtitle">Mobile UI. Build: ${labBuildTag}</p>
+        
         <div class="metaRow">
-          <input id="userId" value="mobile-user" placeholder="userId (email or mobile-user)" />
+          <input id="userId" class="user-input" value="mobile-user" placeholder="userId" />
+        </div>
+
+        <details class="sim-panel">
+          <summary>🔧 Simulator Controls (Overrides /sensorData)</summary>
+          <div class="sim-grid">
+            <label>Posture State
+              <select id="simPosture">
+                <option value="unknown">unknown</option>
+                <option value="good" selected>good</option>
+                <option value="slouching">slouching</option>
+              </select>
+            </label>
+            <label>Trend
+              <select id="simTrend">
+                <option value="stable" selected>stable</option>
+                <option value="worsening">worsening</option>
+                <option value="improving">improving</option>
+              </select>
+            </label>
+            <label>MPU Angle (deg)<input id="simMpu" type="number" value="15" /></label>
+            <label>FSR Pressure<input id="simFsr" type="number" value="450" /></label>
+            <label>Slouch Duration (s)<input id="simSlouchSec" type="number" value="0" /></label>
+            <label>Corrections Today<input id="simCorrections" type="number" value="0" /></label>
+            <label class="checkbox-label"><input id="simVib" type="checkbox" /> App Vibration</label>
+            <label class="checkbox-label"><input id="simAir" type="checkbox" /> Air Chamber</label>
+          </div>
+        </details>
+
+        <div class="metaRow">
           <label class="toggle">
-            <input id="includeModelPayload" type="checkbox" checked />
-            Include model payload in API response (debug)
+            <input id="includeModelPayload" type="checkbox" checked /> Debug AI Payload
           </label>
         </div>
+        
         <div class="status" id="status">Ready.</div>
-        <div class="status" id="sensorStatus">sensorData: waiting...</div>
+        <div class="status" id="sensorStatus">sensorData: Fetching initial values...</div>
       </div>
 
       <div class="chatList" id="chatList"></div>
@@ -866,257 +755,224 @@ router.get("/posture-coach-lab", (req, res) => {
     </div>
 
     <script>
-      const sendBtn = document.getElementById("sendBtn");
-      const messageInput = document.getElementById("messageInput");
-      const statusEl = document.getElementById("status");
-      const sensorStatusEl = document.getElementById("sensorStatus");
-      const errorEl = document.getElementById("error");
-      const sentRawEl = document.getElementById("sentRaw");
-      const modelRawEl = document.getElementById("modelRaw");
-      const apiRawEl = document.getElementById("apiRaw");
-      const chatList = document.getElementById("chatList");
+      document.addEventListener("DOMContentLoaded", () => {
+        try {
+          const sendBtn = document.getElementById("sendBtn");
+          const messageInput = document.getElementById("messageInput");
+          const statusEl = document.getElementById("status");
+          const sensorStatusEl = document.getElementById("sensorStatus");
+          const errorEl = document.getElementById("error");
+          const sentRawEl = document.getElementById("sentRaw");
+          const modelRawEl = document.getElementById("modelRaw");
+          const apiRawEl = document.getElementById("apiRaw");
+          const chatList = document.getElementById("chatList");
 
-      const SERVER_UNAVAILABLE = "Server is unavailable right now. Please try again later.";
+          const SERVER_UNAVAILABLE = "Server is unavailable right now. Please try again later.";
+          const messages = [{ sender: "coach", text: "Hi, I am your SitX posture coach. Ask me about your sitting habits.", options: [] }];
 
-      const messages = [
-        {
-          sender: "coach",
-          text: "Hi, I am your posture coach. Ask me about your sitting habits.",
-          options: [],
-        },
-      ];
+          const clamp = (value, min, max) => {
+            const number = Number(value);
+            return Number.isFinite(number) ? Math.max(min, Math.min(max, number)) : min;
+          };
 
-      const clamp = (value, min, max) => {
-        const number = Number(value);
-        if (!Number.isFinite(number)) return min;
-        return Math.max(min, Math.min(max, number));
-      };
+          const derivePostureState = (normalCount, slouchyCount) => {
+            if (slouchyCount > normalCount) return "slouching";
+            if (normalCount > 0) return "good";
+            return "unknown";
+          };
 
-      const derivePostureState = (normalCount, slouchyCount) => {
-        if (slouchyCount > normalCount) return "slouching";
-        if (normalCount > 0) return "good";
-        return "unknown";
-      };
+          const deriveTrend = (normalCount, slouchyCount) => {
+            if (slouchyCount > normalCount) return "worsening";
+            if (normalCount > slouchyCount) return "improving";
+            return "stable";
+          };
 
-      const deriveTrend = (normalCount, slouchyCount) => {
-        if (slouchyCount > normalCount) return "worsening";
-        if (normalCount > slouchyCount) return "improving";
-        return "stable";
-      };
+          const scrollToBottom = () => requestAnimationFrame(() => { 
+            if(chatList) chatList.scrollTop = chatList.scrollHeight; 
+          });
 
-      const scrollToBottom = () => {
-        requestAnimationFrame(() => {
-          chatList.scrollTop = chatList.scrollHeight;
-        });
-      };
+          const renderMessages = () => {
+            if (!chatList) return;
+            chatList.innerHTML = "";
+            for (const item of messages) {
+              const wrap = document.createElement("div");
+              wrap.className = "bubbleWrap " + item.sender;
+              const bubble = document.createElement("div");
+              bubble.className = "bubble";
+              bubble.textContent = item.text;
+              wrap.appendChild(bubble);
 
-      const renderMessages = () => {
-        chatList.innerHTML = "";
-
-        for (const item of messages) {
-          const wrap = document.createElement("div");
-          wrap.className = "bubbleWrap " + item.sender;
-
-          const bubble = document.createElement("div");
-          bubble.className = "bubble";
-          bubble.textContent = item.text;
-          wrap.appendChild(bubble);
-
-          if (item.sender === "coach" && Array.isArray(item.options) && item.options.length > 0) {
-            const chips = document.createElement("div");
-            chips.className = "chips";
-
-            for (const option of item.options) {
-              const chip = document.createElement("button");
-              chip.className = "chip";
-              chip.type = "button";
-              chip.textContent = option;
-              chip.disabled = sendBtn.disabled;
-              chip.addEventListener("click", () => sendMessage(option));
-              chips.appendChild(chip);
+              if (item.sender === "coach" && Array.isArray(item.options) && item.options.length > 0) {
+                const chips = document.createElement("div");
+                chips.className = "chips";
+                for (const option of item.options) {
+                  const chip = document.createElement("button");
+                  chip.className = "chip";
+                  chip.type = "button";
+                  chip.textContent = option;
+                  chip.disabled = sendBtn ? sendBtn.disabled : false;
+                  chip.addEventListener("click", () => sendMessage(option));
+                  chips.appendChild(chip);
+                }
+                bubble.appendChild(chips);
+              }
+              chatList.appendChild(wrap);
             }
+            scrollToBottom();
+          };
 
-            bubble.appendChild(chips);
-          }
+          const setLoading = (loading) => {
+            if (sendBtn) {
+              sendBtn.disabled = loading;
+              sendBtn.textContent = loading ? "..." : "\u27A4";
+            }
+            if (statusEl) statusEl.textContent = loading ? "Sending request..." : "Ready.";
+          };
 
-          chatList.appendChild(wrap);
-        }
-
-        scrollToBottom();
-      };
-
-      const setLoading = (loading) => {
-        sendBtn.disabled = loading;
-        sendBtn.textContent = loading ? "..." : "\u27A4";
-        statusEl.textContent = loading ? "Sending request to /api/posture-coach/chat..." : "Ready.";
-      };
-
-      window.addEventListener("error", (event) => {
-        errorEl.textContent = "Client error: " + String(event?.message || "unknown error");
-      });
-
-      window.addEventListener("unhandledrejection", (event) => {
-        errorEl.textContent = "Unhandled promise: " + String(event?.reason || "unknown rejection");
-      });
-
-      const fetchMobileEquivalentSnapshot = async () => {
-        try {
-          const response = await fetch("/sensorData", {
-            method: "GET",
-            headers: { "Content-Type": "application/json" },
+          window.addEventListener("error", (e) => {
+            if(errorEl) errorEl.textContent = "Window Error: " + String(e?.message);
+          });
+          window.addEventListener("unhandledrejection", (e) => {
+            if(errorEl) errorEl.textContent = "Promise Error: " + String(e?.reason);
           });
 
-          if (!response.ok) {
-            throw new Error("HTTP " + response.status + " from /sensorData");
-          }
+          const fetchInitialSensorData = async () => {
+            try {
+              const controller = new AbortController();
+              const timeoutId = setTimeout(() => controller.abort(), 3500);
+              
+              const response = await fetch("/sensorData", { 
+                headers: { "Content-Type": "application/json" },
+                signal: controller.signal
+              });
+              clearTimeout(timeoutId);
 
-          const data = await response.json();
-          const normalCount = clamp(data?.h || 0, 0, 100000000);
-          const slouchyCount = clamp(data?.i || 0, 0, 100000000);
-          const rightCount = clamp(data?.f || 0, 0, 100000000);
-          const leftCount = clamp(data?.g || 0, 0, 100000000);
+              if (response.ok) {
+                const data = await response.json();
+                
+                const doc = Array.isArray(data) ? data[0] : data;
+                if (!doc) throw new Error("Received empty data object");
 
-          const postureState = derivePostureState(normalCount, slouchyCount);
-          const trend = deriveTrend(normalCount, slouchyCount);
-          const slouchDurationSec = clamp(slouchyCount * 30, 0, 7200);
-          const correctionsToday = clamp(slouchyCount + leftCount + rightCount, 0, 500);
+                const normalCount = clamp(doc?.h || 0, 0, 100000000);
+                const slouchyCount = clamp(doc?.i || 0, 0, 100000000);
+                const rightCount = clamp(doc?.f || 0, 0, 100000000);
+                const leftCount = clamp(doc?.g || 0, 0, 100000000);
 
-          sensorStatusEl.textContent =
-            "sensorData synced | postureState=" + postureState +
-            " | trend=" + trend +
-            " | slouchDurationSec=" + slouchDurationSec +
-            " | correctionsToday=" + correctionsToday;
-
-          return {
-            postureState,
-            trend,
-            slouchDurationSec,
-            correctionsToday,
+                document.getElementById("simPosture").value = derivePostureState(normalCount, slouchyCount);
+                document.getElementById("simTrend").value = deriveTrend(normalCount, slouchyCount);
+                document.getElementById("simSlouchSec").value = clamp(slouchyCount * 30, 0, 7200);
+                document.getElementById("simCorrections").value = clamp(slouchyCount + leftCount + rightCount, 0, 500);
+                
+                if(sensorStatusEl) sensorStatusEl.textContent = "Initial sensor data loaded into Simulator panel.";
+              } else {
+                if(sensorStatusEl) sensorStatusEl.textContent = "Live /sensorData unavailable. Using defaults.";
+              }
+            } catch (error) {
+              if(sensorStatusEl) sensorStatusEl.textContent = "Live /sensorData unavailable. Using defaults.";
+              console.error("Sensor Data Fetch Failed:", error);
+            }
           };
-        } catch (error) {
-          sensorStatusEl.textContent =
-            "sensorData sync failed, fallback defaults | " +
-            String(error && error.message ? error.message : error);
 
-          return {
-            postureState: "unknown",
-            trend: "stable",
-            slouchDurationSec: 0,
-            correctionsToday: 0,
+          const buildMobileEquivalentPayload = (text) => {
+            const history = messages
+              .slice(0, Math.max(messages.length - 1, 0))
+              .map((msg) => String(msg.text || ""))
+              .filter((msg) => msg.trim().length > 0);
+
+            return {
+              userId: document.getElementById("userId").value.trim() || "mobile-user",
+              message: text,
+              postureState: document.getElementById("simPosture").value,
+              trend: document.getElementById("simTrend").value,
+              slouchDurationSec: Number(document.getElementById("simSlouchSec").value || 0),
+              correctionsToday: Number(document.getElementById("simCorrections").value || 0),
+              discomfortLevel: 0,
+              mpuAngle: Number(document.getElementById("simMpu").value || 0),
+              fsrPressure: Number(document.getElementById("simFsr").value || 0),
+              vibrationActive: document.getElementById("simVib").checked,
+              airChamberActive: document.getElementById("simAir").checked,
+              debugModelPayload: Boolean(document.getElementById("includeModelPayload")?.checked),
+              history: history.length > 12 ? history.slice(history.length - 12) : history,
+            };
           };
-        }
-      };
 
-      const buildMobileEquivalentPayload = async (text) => {
-        const snapshot = await fetchMobileEquivalentSnapshot();
+          const sendMessage = async (presetText) => {
+            const text = String(presetText ?? messageInput.value ?? "").trim();
+            if (!text || (sendBtn && sendBtn.disabled)) return;
 
-        // Match mobile logic: history is all prior messages excluding the latest user message.
-        const history = messages
-          .slice(0, Math.max(messages.length - 1, 0))
-          .map((msg) => String(msg.text || ""))
-          .filter((msg) => msg.trim().length > 0);
-
-        return {
-          userId: document.getElementById("userId").value.trim() || "mobile-user",
-          message: text,
-          postureState: snapshot.postureState,
-          trend: snapshot.trend,
-          slouchDurationSec: snapshot.slouchDurationSec,
-          correctionsToday: snapshot.correctionsToday,
-          discomfortLevel: 0,
-          debugModelPayload: Boolean(document.getElementById("includeModelPayload")?.checked),
-          history: history.length > 12 ? history.slice(history.length - 12) : history,
-        };
-      };
-
-      const sendMessage = async (presetText) => {
-        const text = String(presetText ?? messageInput.value ?? "").trim();
-        if (!text || sendBtn.disabled) return;
-
-        errorEl.textContent = "";
-        messages.push({ sender: "user", text, options: [] });
-        renderMessages();
-
-        if (!presetText) {
-          messageInput.value = "";
-        }
-
-        setLoading(true);
-
-        try {
-          modelRawEl.textContent = "";
-          apiRawEl.textContent = "";
-          const payload = await buildMobileEquivalentPayload(text);
-          sentRawEl.textContent = JSON.stringify(payload, null, 2);
-
-          const response = await fetch("/api/posture-coach/chat", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
-          });
-
-          const contentType = (response.headers.get("content-type") || "").toLowerCase();
-          let data = null;
-
-          if (contentType.includes("application/json")) {
-            data = await response.json();
-            apiRawEl.textContent = "API RESPONSE:\n" + JSON.stringify(data, null, 2);
-          } else {
-            const textBody = await response.text();
-            apiRawEl.textContent = "NON-JSON RESPONSE:\n" + textBody;
-            throw new Error("Expected JSON but received " + (contentType || "unknown") + ". " + textBody.slice(0, 120));
-          }
-
-          if (response.status !== 200) {
-            messages.push({ sender: "coach", text: SERVER_UNAVAILABLE, options: [] });
+            if(errorEl) errorEl.textContent = "";
+            messages.push({ sender: "user", text, options: [] });
             renderMessages();
-            return;
-          }
 
-          if (data?.debug?.modelPayload) {
-            const reason = data?.debug?.reason ? "\nreason: " + String(data.debug.reason) : "";
-            modelRawEl.textContent = "MODEL PAYLOAD SENT TO AI:" + reason + "\n" + JSON.stringify(data.debug.modelPayload, null, 2);
-          } else {
-            modelRawEl.textContent =
-              "Model payload debug not included in response.\n" +
-              "Tip: ensure checkbox is checked, run from localhost, and review returned JSON below.\n\n" +
-              JSON.stringify(data, null, 2);
-          }
+            if (!presetText && messageInput) messageInput.value = "";
+            setLoading(true);
 
-          const source = String(data?.source || "").toLowerCase();
-          const coach = data?.coach && typeof data.coach === "object" ? data.coach : null;
-          const reply = coach && typeof coach.reply === "string" ? coach.reply.trim() : "";
-          const options = Array.isArray(coach?.options)
-            ? coach.options.map((item) => String(item || "").trim()).filter(Boolean)
-            : [];
+            try {
+              if(modelRawEl) modelRawEl.textContent = ""; 
+              if(apiRawEl) apiRawEl.textContent = "";
+              
+              const payload = buildMobileEquivalentPayload(text);
+              if(sentRawEl) sentRawEl.textContent = "PAYLOAD SENT TO EXPRESS:\\n" + JSON.stringify(payload, null, 2);
 
-          messages.push({
-            sender: "coach",
-            text: source === "unavailable" ? SERVER_UNAVAILABLE : (reply || SERVER_UNAVAILABLE),
-            options,
+              const response = await fetch("/api/posture-coach/chat", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+              });
+
+              const contentType = (response.headers.get("content-type") || "").toLowerCase();
+              let data = null;
+
+              if (contentType.includes("application/json")) {
+                data = await response.json();
+                if(apiRawEl) apiRawEl.textContent = "API RESPONSE:\\n" + JSON.stringify(data, null, 2);
+              } else {
+                const textBody = await response.text();
+                if(apiRawEl) apiRawEl.textContent = "NON-JSON RESPONSE:\\n" + textBody;
+                throw new Error("Expected JSON but received " + (contentType || "unknown"));
+              }
+
+              if (response.status !== 200) {
+                messages.push({ sender: "coach", text: SERVER_UNAVAILABLE, options: [] });
+                return;
+              }
+
+              if (data?.debug?.modelPayload && modelRawEl) {
+                modelRawEl.textContent = "MODEL PAYLOAD SENT TO AI:\\n" + JSON.stringify(data.debug.modelPayload, null, 2);
+              }
+
+              const coach = data?.coach && typeof data.coach === "object" ? data.coach : null;
+              const reply = coach && typeof coach.reply === "string" ? coach.reply.trim() : "";
+              const options = Array.isArray(coach?.options) ? coach.options.map(i => String(i || "").trim()).filter(Boolean) : [];
+
+              messages.push({
+                sender: "coach",
+                text: reply || SERVER_UNAVAILABLE,
+                options,
+              });
+            } catch (error) {
+              messages.push({ sender: "coach", text: SERVER_UNAVAILABLE, options: [] });
+              if(apiRawEl) apiRawEl.textContent = "REQUEST FAILED:\\n" + String(error.message);
+              if(errorEl) errorEl.textContent = String(error.message);
+            } finally {
+              setLoading(false);
+              renderMessages();
+            }
+          };
+
+          if (sendBtn) sendBtn.addEventListener("click", () => sendMessage());
+          if (messageInput) messageInput.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
           });
-          renderMessages();
-        } catch (error) {
-          messages.push({ sender: "coach", text: SERVER_UNAVAILABLE, options: [] });
-          renderMessages();
-          apiRawEl.textContent = "REQUEST FAILED:\n" + String(error && error.message ? error.message : error);
-          errorEl.textContent = String(error && error.message ? error.message : error);
-        } finally {
-          setLoading(false);
-          renderMessages();
-        }
-      };
 
-      sendBtn.addEventListener("click", () => sendMessage());
-      messageInput.addEventListener("keydown", (event) => {
-        if (event.key === "Enter" && !event.shiftKey) {
-          event.preventDefault();
-          sendMessage();
+          fetchInitialSensorData();
+          renderMessages();
+
+        } catch (fatalError) {
+          const errDiv = document.getElementById("error");
+          if(errDiv) errDiv.textContent = "CRITICAL INIT ERROR: " + fatalError.message;
         }
       });
-
-      fetchMobileEquivalentSnapshot();
-      renderMessages();
     </script>
   </body>
 </html>`);
