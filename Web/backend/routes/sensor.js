@@ -21,6 +21,48 @@ const toIsoOrNull = (value) => {
     return Number.isNaN(date.getTime()) ? null : date.toISOString();
 };
 
+const toBool = (value) => Boolean(value);
+
+const toValidDate = (value) => {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const computeTransitionAndDuration = ({ records, baselineState, field, rangeStart, rangeEnd }) => {
+    let previousState = toBool(baselineState);
+    let previousAt = rangeStart;
+    let openedCount = 0;
+    let activeDurationSec = 0;
+
+    for (const record of records) {
+        const at = toValidDate(record.receivedAt);
+        if (!at) {
+            continue;
+        }
+
+        if (previousState) {
+            activeDurationSec += Math.max(0, (at.getTime() - previousAt.getTime()) / 1000);
+        }
+
+        const currentState = toBool(record[field]);
+        if (currentState && !previousState) {
+            openedCount += 1;
+        }
+
+        previousState = currentState;
+        previousAt = at;
+    }
+
+    if (previousState) {
+        activeDurationSec += Math.max(0, (rangeEnd.getTime() - previousAt.getTime()) / 1000);
+    }
+
+    return {
+        openedCount,
+        activeDurationSec: Math.round(activeDurationSec),
+    };
+};
+
 const preaggregationCache = {
     generatedAt: null,
     aggregetedMetrics: null,
@@ -35,11 +77,29 @@ const buildHistoryWindowAggregate = async (days) => {
     const now = new Date();
     const rangeStart = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
 
-    const [latestInRangeHistory, baselineBeforeRangeHistory, recordsInRange] = await Promise.all([
+    const [latestInRangeHistory, baselineBeforeRangeHistory, historyRecords] = await Promise.all([
         SitxHistory.findOne({ receivedAt: { $gte: rangeStart } }).sort({ receivedAt: -1 }).lean(),
         SitxHistory.findOne({ receivedAt: { $lt: rangeStart } }).sort({ receivedAt: -1 }).lean(),
-        SitxHistory.countDocuments({ receivedAt: { $gte: rangeStart } }),
+        SitxHistory.find(
+            { receivedAt: { $gte: rangeStart } },
+            {
+                receivedAt: 1,
+                a: 1,
+                b: 1,
+                c: 1,
+                h: 1,
+                i: 1,
+                k: 1,
+                l: 1,
+                m: 1,
+                vibrationActiveDurationSec: 1,
+                airChamberActiveDurationSec: 1,
+                valveOpenDurationSec: 1,
+            }
+        ).sort({ receivedAt: 1 }).lean(),
     ]);
+
+    const recordsInRange = historyRecords.length;
 
     if (!latestInRangeHistory) {
         return {
@@ -64,18 +124,43 @@ const buildHistoryWindowAggregate = async (days) => {
     const deltaCounter = (field) =>
         Math.max(0, toNumber(latestInRangeHistory[field]) - toNumber(baselineBeforeRangeHistory?.[field]));
 
+    const valveDerived = computeTransitionAndDuration({
+        records: historyRecords,
+        baselineState: baselineBeforeRangeHistory?.a,
+        field: 'a',
+        rangeStart,
+        rangeEnd: now,
+    });
+
+    const pumpDerived = computeTransitionAndDuration({
+        records: historyRecords,
+        baselineState: baselineBeforeRangeHistory?.b,
+        field: 'b',
+        rangeStart,
+        rangeEnd: now,
+    });
+
+    const vibrationDerived = computeTransitionAndDuration({
+        records: historyRecords,
+        baselineState: baselineBeforeRangeHistory?.c,
+        field: 'c',
+        rangeStart,
+        rangeEnd: now,
+    });
+
     // Legacy packed counters in history:
     // k => pump/air-chamber opens, l => vibration opens.
     // Some deployments may later store duration-like counters directly.
-    const vibrationOpenedCount = deltaCounter('l');
-    const airChamberOpenedCount = deltaCounter('k');
-    const valveOpenedCount = deltaCounter('m');
+    const vibrationOpenedCount = deltaCounter('l') || vibrationDerived.openedCount || slouchyCount;
+    const airChamberOpenedCount = deltaCounter('k') || pumpDerived.openedCount;
+    const valveOpenedCount = deltaCounter('m') || valveDerived.openedCount;
 
     const vibrationActiveDurationSec =
-        deltaCounter('vibrationActiveDurationSec') || vibrationOpenedCount;
+        deltaCounter('vibrationActiveDurationSec') || vibrationDerived.activeDurationSec || vibrationOpenedCount;
     const airChamberActiveDurationSec =
-        deltaCounter('airChamberActiveDurationSec') || airChamberOpenedCount;
-    const valveOpenDurationSec = deltaCounter('valveOpenDurationSec') || valveOpenedCount;
+        deltaCounter('airChamberActiveDurationSec') || pumpDerived.activeDurationSec || airChamberOpenedCount;
+    const valveOpenDurationSec =
+        deltaCounter('valveOpenDurationSec') || valveDerived.activeDurationSec || valveOpenedCount;
 
     return {
         days,
@@ -243,6 +328,16 @@ const getSensorRoutes = (io) => {
         } catch (err) {
             console.error('Error fetching aggregeted sensor history:', err);
             return res.status(500).json({ error: 'error fetching aggregeted sensor history from database' });
+        }
+    });
+
+    router.get('/sensorHistory/aggregated', async (req, res) => {
+        try {
+            const payload = await getPreaggregatedPayload();
+            return res.status(200).json(payload);
+        } catch (err) {
+            console.error('Error fetching aggregated sensor history:', err);
+            return res.status(500).json({ error: 'error fetching aggregated sensor history from database' });
         }
     });
 
