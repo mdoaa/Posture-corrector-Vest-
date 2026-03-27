@@ -61,6 +61,21 @@ const buildHistoryWindowAggregate = async (days) => {
 
     const normalCount = Math.max(0, toNumber(latestInRangeHistory.h) - toNumber(baselineBeforeRangeHistory?.h));
     const slouchyCount = Math.max(0, toNumber(latestInRangeHistory.i) - toNumber(baselineBeforeRangeHistory?.i));
+    const deltaCounter = (field) =>
+        Math.max(0, toNumber(latestInRangeHistory[field]) - toNumber(baselineBeforeRangeHistory?.[field]));
+
+    // Legacy packed counters in history:
+    // k => pump/air-chamber opens, l => vibration opens.
+    // Some deployments may later store duration-like counters directly.
+    const vibrationOpenedCount = deltaCounter('l');
+    const airChamberOpenedCount = deltaCounter('k');
+    const valveOpenedCount = deltaCounter('m');
+
+    const vibrationActiveDurationSec =
+        deltaCounter('vibrationActiveDurationSec') || vibrationOpenedCount;
+    const airChamberActiveDurationSec =
+        deltaCounter('airChamberActiveDurationSec') || airChamberOpenedCount;
+    const valveOpenDurationSec = deltaCounter('valveOpenDurationSec') || valveOpenedCount;
 
     return {
         days,
@@ -70,12 +85,12 @@ const buildHistoryWindowAggregate = async (days) => {
         recordsInRange,
         normalCount,
         slouchyCount,
-        vibrationOpenedCount: 0,
-        airChamberOpenedCount: 0,
-        valveOpenedCount: 0,
-        vibrationActiveDurationSec: 0,
-        airChamberActiveDurationSec: 0,
-        valveOpenDurationSec: 0,
+        vibrationOpenedCount,
+        airChamberOpenedCount,
+        valveOpenedCount,
+        vibrationActiveDurationSec,
+        airChamberActiveDurationSec,
+        valveOpenDurationSec,
     };
 };
 

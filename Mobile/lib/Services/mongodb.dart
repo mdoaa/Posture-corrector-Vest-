@@ -388,14 +388,114 @@ class Mongodb {
     return {};
   }
 
+  static int _parseInt(dynamic value) {
+    if (value is int) return value;
+    if (value is double) return value.toInt();
+
+    final raw = value?.toString().trim() ?? '';
+    if (raw.isEmpty) return 0;
+
+    final direct = int.tryParse(raw);
+    if (direct != null) return direct;
+
+    final asDouble = double.tryParse(raw);
+    if (asDouble != null) return asDouble.toInt();
+
+    final match = RegExp(r'-?\d+(?:\.\d+)?').firstMatch(raw);
+    if (match == null) return 0;
+    final extracted = double.tryParse(match.group(0)!);
+    return extracted?.toInt() ?? 0;
+  }
+
+  static int _pickInt(Map<String, dynamic> source, List<String> keys) {
+    int? firstSeen;
+    for (final key in keys) {
+      if (!source.containsKey(key)) continue;
+      final parsed = _parseInt(source[key]);
+      firstSeen ??= parsed;
+      if (parsed != 0) return parsed;
+    }
+    return firstSeen ?? 0;
+  }
+
+  static int _pickDurationSeconds(
+    Map<String, dynamic> source,
+    List<String> secondKeys,
+    List<String> minuteKeys,
+    List<String> millisecondKeys,
+    List<String> countFallbackKeys,
+  ) {
+    final fromSeconds = _pickInt(source, secondKeys);
+    if (fromSeconds != 0) return fromSeconds;
+
+    final fromMinutes = _pickInt(source, minuteKeys);
+    if (fromMinutes != 0) return fromMinutes * 60;
+
+    final fromMilliseconds = _pickInt(source, millisecondKeys);
+    if (fromMilliseconds != 0) return fromMilliseconds ~/ 1000;
+
+    // Final fallback: some backends only expose open-count style fields.
+    return _pickInt(source, countFallbackKeys);
+  }
+
+  static Map<String, int> _extractWindowMetricsFromMap(
+    Map<String, dynamic> window,
+  ) {
+    return {
+      'normalCount': _pickInt(window, ['normalCount', 'normal', 'h']),
+      'slouchyCount': _pickInt(window, [
+        'slouchyCount',
+        'slouchCount',
+        'slouchy',
+        'i',
+      ]),
+      'vibrationActiveDurationSec': _pickDurationSeconds(
+        window,
+        [
+          'vibrationActiveDurationSec',
+          'vibrationDurationSec',
+          'vibrationTimeSec',
+        ],
+        [
+          'vibrationActiveDurationMin',
+          'vibrationDurationMin',
+          'vibrationMinutes',
+        ],
+        ['vibrationActiveDurationMs', 'vibrationDurationMs'],
+        ['vibrationOpenedCount', 'vibrationCount', 'l'],
+      ),
+      'airChamberActiveDurationSec': _pickDurationSeconds(
+        window,
+        ['airChamberActiveDurationSec', 'airDurationSec', 'airChamberTimeSec'],
+        ['airChamberActiveDurationMin', 'airDurationMin', 'airChamberMinutes'],
+        ['airChamberActiveDurationMs', 'airDurationMs'],
+        ['airChamberOpenedCount', 'airOpenedCount', 'pumpCount', 'k'],
+      ),
+    };
+  }
+
+  static Map<String, dynamic>? _extractMetricsContainer(dynamic decodedData) {
+    if (decodedData is! Map<String, dynamic>) return null;
+
+    final dynamic nestedMetrics = decodedData['metrics'];
+    if (nestedMetrics is Map<String, dynamic>) {
+      return nestedMetrics;
+    }
+
+    return decodedData;
+  }
+
   /// Fetch today's aggregated metrics from /sensorHistory/aggregeted.
   /// Returns keys: normalCount, slouchyCount,
   /// vibrationActiveDurationSec, airChamberActiveDurationSec.
   static Future<Map<String, int>> fetchTodayAggregatedWindow() async {
     final endpoints = [
       '$baseUrl/sensorHistory/aggregeted',
+      '$baseUrl/sensorHistory/aggregated',
       '$baseUrl/api/sensorHistory/aggregeted',
+      '$baseUrl/api/sensorHistory/aggregated',
       '$baseUrl/api/sensor/history/aggregeted',
+      '$baseUrl/api/sensor/history/aggregated',
     ];
 
     for (final endpoint in endpoints) {
@@ -408,38 +508,13 @@ class Mongodb {
 
         if (response.statusCode == 200) {
           final dynamic decodedData = jsonDecode(response.body);
-          if (decodedData is! Map<String, dynamic>) {
-            continue;
-          }
+          final metrics = _extractMetricsContainer(decodedData);
+          if (metrics == null) continue;
 
-          final dynamic metrics = decodedData['metrics'];
-          if (metrics is! Map<String, dynamic>) {
-            continue;
-          }
+          final dynamic todayRaw = metrics['today'] ?? metrics;
+          if (todayRaw is! Map<String, dynamic>) continue;
 
-          final dynamic today = metrics['today'];
-          if (today is! Map<String, dynamic>) {
-            continue;
-          }
-
-          int parseInt(dynamic value) {
-            if (value is int) return value;
-            if (value is double) return value.toInt();
-            return int.tryParse(value?.toString() ?? '') ?? 0;
-          }
-
-          return {
-            'normalCount': parseInt(today['normalCount']),
-            'slouchyCount': parseInt(today['slouchyCount']),
-            'vibrationActiveDurationSec':
-                parseInt(today['vibrationActiveDurationSec']) != 0
-                ? parseInt(today['vibrationActiveDurationSec'])
-                : parseInt(today['vibrationOpenedCount']),
-            'airChamberActiveDurationSec':
-                parseInt(today['airChamberActiveDurationSec']) != 0
-                ? parseInt(today['airChamberActiveDurationSec'])
-                : parseInt(today['airChamberOpenedCount']),
-          };
+          return _extractWindowMetricsFromMap(todayRaw);
         }
 
         if (response.statusCode == 404) {
@@ -463,15 +538,12 @@ class Mongodb {
   static Future<Map<String, Map<String, int>>> fetchAggregatedMetrics() async {
     final endpoints = [
       '$baseUrl/sensorHistory/aggregeted',
+      '$baseUrl/sensorHistory/aggregated',
       '$baseUrl/api/sensorHistory/aggregeted',
+      '$baseUrl/api/sensorHistory/aggregated',
       '$baseUrl/api/sensor/history/aggregeted',
+      '$baseUrl/api/sensor/history/aggregated',
     ];
-
-    int parseInt(dynamic value) {
-      if (value is int) return value;
-      if (value is double) return value.toInt();
-      return int.tryParse(value?.toString() ?? '') ?? 0;
-    }
 
     for (final endpoint in endpoints) {
       try {
@@ -486,29 +558,24 @@ class Mongodb {
         }
 
         final dynamic decoded = jsonDecode(response.body);
-        if (decoded is! Map<String, dynamic>) continue;
+        final metrics = _extractMetricsContainer(decoded);
+        if (metrics == null) continue;
 
-        final dynamic metrics = decoded['metrics'];
-        if (metrics is! Map<String, dynamic>) continue;
-
-        final keys = ['today', 'week', 'twoWeeks', 'month', 'sixMonths', 'year'];
+        final keys = [
+          'today',
+          'week',
+          'twoWeeks',
+          'month',
+          'sixMonths',
+          'year',
+        ];
         final Map<String, Map<String, int>> result = {};
 
         for (final key in keys) {
-          final dynamic window = metrics[key];
+          final dynamic window =
+              metrics[key] ?? (key == 'today' ? metrics : null);
           if (window is Map<String, dynamic>) {
-            result[key] = {
-              'normalCount': parseInt(window['normalCount']),
-              'slouchyCount': parseInt(window['slouchyCount']),
-              'vibrationActiveDurationSec':
-                  parseInt(window['vibrationActiveDurationSec']) != 0
-                  ? parseInt(window['vibrationActiveDurationSec'])
-                  : parseInt(window['vibrationOpenedCount']),
-              'airChamberActiveDurationSec':
-                  parseInt(window['airChamberActiveDurationSec']) != 0
-                  ? parseInt(window['airChamberActiveDurationSec'])
-                  : parseInt(window['airChamberOpenedCount']),
-            };
+            result[key] = _extractWindowMetricsFromMap(window);
           } else {
             result[key] = {
               'normalCount': 0,
