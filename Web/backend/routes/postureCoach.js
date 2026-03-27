@@ -9,8 +9,6 @@ const MAX_HISTORY_ITEMS = 12;
 const RATE_WINDOW_MS = 60 * 1000;
 const RATE_LIMIT_COUNT = 20;
 const AGGREGATED_FETCH_TIMEOUT_MS = 4500;
-const AGGREGATED_PRIMARY_WINDOW = "week";
-const AGGREGATED_FALLBACK_WINDOWS = ["today", "twoWeeks", "month", "sixMonths", "year"];
 const AGGREGATED_WINDOW_SEQUENCE = [
   { key: "today", days: 1 },
   { key: "week", days: 7 },
@@ -21,13 +19,11 @@ const AGGREGATED_WINDOW_SEQUENCE = [
 ];
 
 const requestBuckets = new Map();
-const DEFAULT_SINGLE_USER_ID = "vest-single-user";
+const DEFAULT_SINGLE_USER_ID = "mobile-user";
 
 const detectLanguageHint = (text) => {
   const input = String(text || "").trim();
   if (!input) return "same-as-user";
-
-  // Arabic Unicode block detection.
   if (/[\u0600-\u06FF]/.test(input)) return "arabic";
   return "english";
 };
@@ -93,68 +89,39 @@ const fetchAggregatedContext = async (req) => {
         };
       }
     } catch (error) {
-      // Try the next candidate endpoint.
+      // Try next
     }
   }
 
   return { hasData: false, source: null, generatedAt: null, metrics: {} };
 };
 
+const clampNumber = (value, min, max, fallback = 0) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(min, Math.min(max, parsed)) : fallback;
+};
+
+const sanitizeText = (value, maxLength = MAX_MESSAGE_LENGTH) => {
+  return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
+};
+
 const sanitizeWindowMetrics = (value) => {
   const source = value && typeof value === "object" ? value : {};
   return {
     days: clampNumber(source.days, 0, 3650),
-    from: sanitizeText(source.from, 60),
-    to: sanitizeText(source.to, 60),
-    latestAt: sanitizeText(source.latestAt, 60),
     recordsInRange: clampNumber(source.recordsInRange, 0, 10_000_000),
     normalCount: clampNumber(source.normalCount, 0, 10_000_000),
     slouchyCount: clampNumber(source.slouchyCount, 0, 10_000_000),
-    vibrationOpenedCount: clampNumber(source.vibrationOpenedCount, 0, 10_000_000),
-    airChamberOpenedCount: clampNumber(source.airChamberOpenedCount, 0, 10_000_000),
-    valveOpenedCount: clampNumber(source.valveOpenedCount, 0, 10_000_000),
-    vibrationActiveDurationSec: clampNumber(source.vibrationActiveDurationSec, 0, 10_000_000),
-    airChamberActiveDurationSec: clampNumber(source.airChamberActiveDurationSec, 0, 10_000_000),
-    valveOpenDurationSec: clampNumber(source.valveOpenDurationSec, 0, 10_000_000),
   };
 };
 
 const sanitizeAggregatedMetrics = (value) => {
   const source = value && typeof value === "object" ? value : {};
   const sanitized = {};
-
   for (const [windowKey, windowMetrics] of Object.entries(source)) {
     sanitized[sanitizeText(windowKey, 30)] = sanitizeWindowMetrics(windowMetrics);
   }
-
   return sanitized;
-};
-
-const pickBestAggregatedWindow = (metrics) => {
-  if (!metrics || typeof metrics !== "object") return null;
-
-  const primary = metrics[AGGREGATED_PRIMARY_WINDOW];
-  if (primary) return { key: AGGREGATED_PRIMARY_WINDOW, metrics: primary };
-
-  for (const key of AGGREGATED_FALLBACK_WINDOWS) {
-    if (metrics[key]) return { key, metrics: metrics[key] };
-  }
-
-  const dynamicEntry = Object.entries(metrics).find(([, item]) => item && typeof item === "object");
-  if (!dynamicEntry) return null;
-  return { key: dynamicEntry[0], metrics: dynamicEntry[1] };
-};
-
-const inferTrendFromRatios = ({ slouchyShare, vibrationShare, hasDurationSignal }) => {
-  if (hasDurationSignal) {
-    if (vibrationShare >= 0.55) return "worsening";
-    if (vibrationShare <= 0.35) return "improving";
-    return "stable";
-  }
-
-  if (slouchyShare >= 0.55) return "worsening";
-  if (slouchyShare <= 0.35) return "improving";
-  return "stable";
 };
 
 const summarizeReadingsFromAggregated = (aggregatedMetrics) => {
@@ -162,242 +129,30 @@ const summarizeReadingsFromAggregated = (aggregatedMetrics) => {
     key: windowDef.key,
     days: windowDef.days,
     metrics: sanitizeWindowMetrics(aggregatedMetrics?.[windowDef.key]),
-  })).filter((item) => item.metrics.recordsInRange > 0 || item.metrics.latestAt);
+  })).filter((item) => item.metrics.recordsInRange > 0);
 
   if (windows.length === 0) {
-    return {
-      hasData: false,
-      windowsAnalyzed: [],
-      postureTotals: {
-        normalCount: 0,
-        slouchyCount: 0,
-      },
-      activityTotals: {
-        vibrationActiveDurationSec: 0,
-        airChamberActiveDurationSec: 0,
-        vibrationOpenedCount: 0,
-        airChamberOpenedCount: 0,
-      },
-      ratios: {
-        slouchyShare: 0,
-        normalShare: 0,
-        vibrationShare: 0,
-        airSupportShare: 0,
-      },
-      inferredTrend: "stable",
-      insight: "No aggregated sensor metrics were available.",
-    };
+    return { inferredTrend: "stable", insight: "No historical data available." };
   }
 
-  const totals = windows.reduce(
-    (acc, item) => {
-      acc.normalCount += item.metrics.normalCount;
-      acc.slouchyCount += item.metrics.slouchyCount;
-      acc.vibrationOpenedCount += item.metrics.vibrationOpenedCount;
-      acc.airChamberOpenedCount += item.metrics.airChamberOpenedCount;
-      acc.vibrationActiveDurationSec += item.metrics.vibrationActiveDurationSec;
-      acc.airChamberActiveDurationSec += item.metrics.airChamberActiveDurationSec;
-      return acc;
-    },
-    {
-      normalCount: 0,
-      slouchyCount: 0,
-      vibrationOpenedCount: 0,
-      airChamberOpenedCount: 0,
-      vibrationActiveDurationSec: 0,
-      airChamberActiveDurationSec: 0,
-    }
-  );
+  let totalNormal = 0;
+  let totalSlouchy = 0;
+  for (const w of windows) {
+    totalNormal += w.metrics.normalCount;
+    totalSlouchy += w.metrics.slouchyCount;
+  }
 
-  const totalPostureEvents = totals.normalCount + totals.slouchyCount;
-  const slouchyShare = totalPostureEvents > 0 ? Number((totals.slouchyCount / totalPostureEvents).toFixed(3)) : 0;
-  const normalShare = totalPostureEvents > 0 ? Number((totals.normalCount / totalPostureEvents).toFixed(3)) : 0;
+  let trend = "stable";
+  if (totalSlouchy > totalNormal) trend = "worsening";
+  else if (totalNormal > totalSlouchy) trend = "improving";
 
-  const totalActive = totals.vibrationActiveDurationSec + totals.airChamberActiveDurationSec;
-  const vibrationShare = totalActive > 0 ? Number((totals.vibrationActiveDurationSec / totalActive).toFixed(3)) : 0;
-  const airSupportShare = totalActive > 0 ? Number((totals.airChamberActiveDurationSec / totalActive).toFixed(3)) : 0;
-  const hasDurationSignal = totalActive > 0;
-
-  const postureTrend = inferTrendFromRatios({ slouchyShare, vibrationShare, hasDurationSignal });
-
-  const bestWindow = pickBestAggregatedWindow(aggregatedMetrics);
-  const focusWindowKey = bestWindow?.key || windows[windows.length - 1]?.key || null;
-  const focusWindowMetrics = sanitizeWindowMetrics(bestWindow?.metrics);
-  const focusWindowEvents = focusWindowMetrics.normalCount + focusWindowMetrics.slouchyCount;
-  const focusWindowSlouchyShare =
-    focusWindowEvents > 0 ? Number((focusWindowMetrics.slouchyCount / focusWindowEvents).toFixed(3)) : 0;
+  const totalEvents = totalNormal + totalSlouchy;
+  const normalSharePct = totalEvents > 0 ? Math.round((totalNormal / totalEvents) * 100) : 0;
+  const slouchySharePct = totalEvents > 0 ? Math.round((totalSlouchy / totalEvents) * 100) : 0;
 
   return {
-    hasData: true,
-    windowsAnalyzed: windows.map((item) => ({
-      key: item.key,
-      days: item.days,
-      latestAt: item.metrics.latestAt,
-      recordsInRange: item.metrics.recordsInRange,
-      normalCount: item.metrics.normalCount,
-      slouchyCount: item.metrics.slouchyCount,
-      postureQualityRatio:
-        item.metrics.normalCount + item.metrics.slouchyCount > 0
-          ? Number((item.metrics.normalCount / (item.metrics.normalCount + item.metrics.slouchyCount)).toFixed(3))
-          : 0,
-      slouchyShare:
-        item.metrics.normalCount + item.metrics.slouchyCount > 0
-          ? Number((item.metrics.slouchyCount / (item.metrics.normalCount + item.metrics.slouchyCount)).toFixed(3))
-          : 0,
-      vibrationActiveDurationSec: item.metrics.vibrationActiveDurationSec,
-      airChamberActiveDurationSec: item.metrics.airChamberActiveDurationSec,
-    })),
-    latestSnapshotAt: focusWindowMetrics.latestAt || null,
-    focusWindow: {
-      key: focusWindowKey,
-      days: focusWindowMetrics.days,
-      recordsInRange: focusWindowMetrics.recordsInRange,
-      normalCount: focusWindowMetrics.normalCount,
-      slouchyCount: focusWindowMetrics.slouchyCount,
-      slouchyShare: focusWindowSlouchyShare,
-      vibrationActiveDurationSec: focusWindowMetrics.vibrationActiveDurationSec,
-      airChamberActiveDurationSec: focusWindowMetrics.airChamberActiveDurationSec,
-    },
-    postureTotals: {
-      normalCount: totals.normalCount,
-      slouchyCount: totals.slouchyCount,
-    },
-    activityTotals: {
-      vibrationActiveDurationSec: totals.vibrationActiveDurationSec,
-      airChamberActiveDurationSec: totals.airChamberActiveDurationSec,
-      vibrationOpenedCount: totals.vibrationOpenedCount,
-      airChamberOpenedCount: totals.airChamberOpenedCount,
-    },
-    ratios: {
-      slouchyShare,
-      normalShare,
-      vibrationShare,
-      airSupportShare,
-    },
-    inferredTrend: postureTrend,
-    trendBasis: hasDurationSignal ? "duration" : "posture-counts",
-    insight:
-      postureTrend === "worsening"
-        ? hasDurationSignal
-          ? "Across aggregated windows, correction pressure is high versus support duration."
-          : "Across aggregated windows, slouchy events are dominant over normal posture events."
-        : postureTrend === "improving"
-          ? hasDurationSignal
-            ? "Across aggregated windows, support duration is stronger than correction duration."
-            : "Across aggregated windows, normal posture events are dominant over slouchy events."
-          : hasDurationSignal
-            ? "Across aggregated windows, correction and support durations are relatively balanced."
-            : "Across aggregated windows, normal and slouchy posture events are relatively balanced.",
-  };
-};
-
-const buildCoachReadyAggregatedContext = ({ aggregatedMetrics, summary }) => {
-  const windows = AGGREGATED_WINDOW_SEQUENCE.map((windowDef) => {
-    const metrics = sanitizeWindowMetrics(aggregatedMetrics?.[windowDef.key]);
-    const events = metrics.normalCount + metrics.slouchyCount;
-    const slouchySharePct = events > 0 ? Number(((metrics.slouchyCount / events) * 100).toFixed(1)) : 0;
-
-    return {
-      key: windowDef.key,
-      days: windowDef.days,
-      recordsInRange: metrics.recordsInRange,
-      latestAt: metrics.latestAt,
-      postureEvents: {
-        normalCount: metrics.normalCount,
-        slouchyCount: metrics.slouchyCount,
-        slouchySharePct,
-      },
-      deviceActivity: {
-        vibrationOpenedCount: metrics.vibrationOpenedCount,
-        airChamberOpenedCount: metrics.airChamberOpenedCount,
-        vibrationActiveDurationSec: metrics.vibrationActiveDurationSec,
-        airChamberActiveDurationSec: metrics.airChamberActiveDurationSec,
-      },
-    };
-  });
-
-  return {
-    hasData: Boolean(summary?.hasData),
-    trend: summary?.inferredTrend || "stable",
-    trendBasis: summary?.trendBasis || "posture-counts",
-    focusWindow: summary?.focusWindow || null,
-    quickSummary: {
-      insight: summary?.insight || "No aggregated insight available.",
-      slouchySharePct: Number((Number(summary?.ratios?.slouchyShare || 0) * 100).toFixed(1)),
-      vibrationSharePct: Number((Number(summary?.ratios?.vibrationShare || 0) * 100).toFixed(1)),
-      airSupportSharePct: Number((Number(summary?.ratios?.airSupportShare || 0) * 100).toFixed(1)),
-    },
-    windows,
-  };
-};
-
-const buildSensorInterpretationGuide = ({ summary, aggregatedContext }) => {
-  const hasSummary = Boolean(summary?.hasData);
-  const trend = summary?.inferredTrend || "stable";
-  const slouchySharePct = Number(summary?.ratios?.slouchyShare || 0) * 100;
-  const normalSharePct = Number(summary?.ratios?.normalShare || 0) * 100;
-  const vibrationSharePct = Number(summary?.ratios?.vibrationShare || 0) * 100;
-  const airSupportSharePct = Number(summary?.ratios?.airSupportShare || 0) * 100;
-
-  const plainTrendMeaning =
-    trend === "worsening"
-      ? "Posture quality is getting worse in the selected window."
-      : trend === "improving"
-        ? "Posture quality is improving in the selected window."
-        : "Posture quality is relatively stable in the selected window.";
-
-  const severityHint =
-    vibrationSharePct >= 60
-      ? "High vibration correction pressure"
-      : vibrationSharePct >= 35
-        ? "Moderate vibration correction pressure"
-        : "Low vibration correction pressure";
-
-  const supportHint =
-    airSupportSharePct >= 60
-      ? "Strong air chamber support coverage"
-      : airSupportSharePct >= 35
-        ? "Moderate air chamber support coverage"
-        : "Low air chamber support coverage";
-
-  return {
-    hasSummary,
-    meanings: {
-      normalCount: "number of normal posture events in the analyzed windows",
-      slouchyCount: "number of slouching posture events in the analyzed windows",
-      slouchyShare: "share of slouching events among posture events (normal + slouching)",
-      normalShare: "share of normal posture events among posture events (normal + slouching)",
-      vibrationActiveDurationSec: "duration where vibration correction was active",
-      airChamberActiveDurationSec: "duration where air chamber support was active",
-      vibrationShare: "share of vibration-active time across all analyzed windows",
-      airSupportShare: "share of air-chamber-active time across all analyzed windows",
-    },
-    currentSnapshot: {
-      normalCount: Number(summary?.postureTotals?.normalCount || 0),
-      slouchyCount: Number(summary?.postureTotals?.slouchyCount || 0),
-      vibrationActiveDurationSec: Number(summary?.activityTotals?.vibrationActiveDurationSec || 0),
-      airChamberActiveDurationSec: Number(summary?.activityTotals?.airChamberActiveDurationSec || 0),
-    },
-    summaryReading: {
-      inferredTrend: trend,
-      trendBasis: summary?.trendBasis || "posture-counts",
-      slouchySharePct: Number(slouchySharePct.toFixed(1)),
-      normalSharePct: Number(normalSharePct.toFixed(1)),
-      vibrationSharePct: Number(vibrationSharePct.toFixed(1)),
-      airSupportSharePct: Number(airSupportSharePct.toFixed(1)),
-      trendMeaning: plainTrendMeaning,
-      severityHint,
-      supportHint,
-      insight: summary?.insight || "No summary insight available.",
-    },
-    coachingRuleHints: [
-      "Use all windows (1/7/14/30/180/365 days) before deciding coaching intensity.",
-      "If duration metrics are zero or unavailable, infer trend from normalCount vs slouchyCount.",
-      "If vibrationShare is high, user likely needs frequent correction prompts.",
-      "If airSupportShare is high, reinforce sustained support habits and gradual tapering.",
-      "Do not merely repeat durations; explain what the pattern means and suggest next action.",
-    ],
-    aggregatedAvailability: Boolean(aggregatedContext?.hasData),
+    inferredTrend: trend,
+    insight: `Overall, normal posture represents ${normalSharePct}% of recent activity compared to ${slouchySharePct}% slouching.`,
   };
 };
 
@@ -407,7 +162,7 @@ const EMERGENCY_KEYWORDS = [
   "severe pain", "emergency", "suicidal", "self harm", "self-harm",
 ];
 
-// UPDATED: System Prompt tailored strictly for SitX hardware and features
+// UPDATED AI PROMPT: Tailored to read the new Clean Payload
 const COACH_SYSTEM_PROMPT = [
   "You are SitX Coach, a friendly AI assistant integrated into the SitX smart ergonomic jacket.",
   "CONVERSATION STYLE: Be natural, conversational, and friendly. Keep replies short and suitable for mobile chat.",
@@ -418,7 +173,7 @@ const COACH_SYSTEM_PROMPT = [
   "WHEN USER ASKS A CASUAL/GENERAL QUESTION (e.g., 'Hi', 'How are you?', 'ازيك؟'):",
   "- messageType: 'greeting'",
   "- riskLevel: 'low'",
-  "- reply: A warm, natural, friendly response (e.g., 'أنا بخير شكراً، كيفك أنت؟' or 'I'm doing great! How about you?')",
+  "- reply: A warm, natural, friendly response",
   "- suggestedAction: Optional friendly question or encouragement",
   "- deviceCommand: 'none'",
   "- options: Empty array or optional follow-up conversation starters",
@@ -426,7 +181,7 @@ const COACH_SYSTEM_PROMPT = [
   "WHEN USER ASKS ABOUT POSTURE, HEALTH, COMFORT, OR DEVICE:",
   "- messageType: One of 'alert', 'action', 'reinforcement', 'insight', 'safety'",
   "- riskLevel: 'low', 'medium', or 'high'",
-  "- reply: Specialized coaching advice related to posture, comfort, or device usage",
+  "- reply: Specialized coaching advice based on the provided payload.",
   "- suggestedAction: Specific next step (e.g., 'Inflate the air chamber', 'Take a stretch break')",
   "- deviceCommand: Recommend device action if relevant ('inflate_chamber', 'deflate_chamber', 'enable_vibration', etc.)",
   "- options: 2-4 suggested follow-up actions",
@@ -434,36 +189,19 @@ const COACH_SYSTEM_PROMPT = [
   "MEDICAL SAFETY RULES:",
   "- Never diagnose, prescribe, or claim certainty about medical conditions.",
   "- If symptoms suggest emergency, reply with messageType 'safety' and advise immediate medical attention.",
-  "- Recommend professional evaluation for persistent pain.",
-  "- Do not alarm or shame users.",
   "",
-  "DEVICE CONTEXT (for coaching mode only):",
-  "- SitX jacket has Air Chamber (inflate to support posture, deflate to relieve pressure).",
-  "- Use discomfortLevel, slouchDurationSec, and correctionsToday to personalize advice.",
-  "- You receive aggregatedSensorContext directly from /sensorHistory/aggregeted and sensorReadingsSummary derived from it.",
-  "- Do not use raw /sensorHistory in your reasoning. Use only aggregated windows and hardwareState.",
-  "- Analyze all windows: 1, 7, 14, 30, 180, 365 days.",
-  "- Use normalCount/slouchyCount as the primary posture quality signal.",
-  "- Use vibrationActiveDurationSec and airChamberActiveDurationSec when they are available and non-zero.",
-  "- You also receive sensorInterpretationGuide with explicit meanings and interpretation hints.",
-  "- You also receive aggregatedCoachingContext with coach-ready per-window summaries.",
-  "- Do not just repeat numbers. Explain what changed and what it means in simple words.",
-  "- Convert summary signals to action: high slouchyShare or high vibrationShare => stronger corrective coaching; high normalShare or high airSupportShare => reinforce stable support habits.",
+  "DEVICE CONTEXT & DATA (CRITICAL):",
+  "- You will receive a structured JSON payload containing 'currentState', 'hardwareState', 'aiCoachingDirectives', and 'historicalData_ActiveWindowsOnly'.",
+  "- Use 'currentState' to understand the user's immediate situation.",
+  "- Read 'aiCoachingDirectives' for specific rules on how to interpret the data and guide the user.",
+  "- Use 'historicalData_ActiveWindowsOnly' ONLY when answering questions about past performance.",
+  "- Do not just repeat raw numbers; explain what the patterns mean in simple, friendly words.",
   "",
   "SPECIAL CASE: If asked about Omar, reply: 'اه ده برنس المشروع'",
   "",
   "JSON SCHEMA (ALWAYS use this structure):",
   '{"messageType":"greeting|alert|action|reinforcement|insight|safety","reply":"string","suggestedAction":"string","riskLevel":"low|medium|high","deviceCommand":"none|inflate_chamber|deflate_chamber|enable_vibration|disable_vibration","options":["string1","string2"]}'
 ].join("\n");
-
-const clampNumber = (value, min, max, fallback = 0) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? Math.max(min, Math.min(max, parsed)) : fallback;
-};
-
-const sanitizeText = (value, maxLength = MAX_MESSAGE_LENGTH) => {
-  return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
-};
 
 const hasEmergencyContent = (inputText) => {
   const normalized = inputText.toLowerCase();
@@ -522,10 +260,7 @@ const sanitizeModelResponse = (value) => {
   const riskLevel = sanitizeText(value?.riskLevel, 10).toLowerCase();
   const deviceCommand = sanitizeText(value?.deviceCommand, 25).toLowerCase();
   const options = Array.isArray(value?.options)
-    ? value.options
-        .map((item) => sanitizeText(String(item), 100))
-        .filter(Boolean)
-        .slice(0, 4)
+    ? value.options.map((item) => sanitizeText(String(item), 100)).filter(Boolean).slice(0, 4)
     : [];
 
   return {
@@ -585,7 +320,9 @@ const generateCoachReply = async (aiConfig, payload) => {
   return parsed;
 };
 
-// FIXED: Escaped \\n to prevent SyntaxErrors in the generated browser JS
+// ============================================================================
+// THE LAB UI (Safe Boot, CSP Bypass, Simulator Controls)
+// ============================================================================
 router.get("/posture-coach-lab", (req, res) => {
   res.removeHeader("Content-Security-Policy");
   res.removeHeader("X-Content-Security-Policy");
@@ -824,7 +561,7 @@ router.get("/posture-coach-lab", (req, res) => {
           const setLoading = (loading) => {
             if (sendBtn) {
               sendBtn.disabled = loading;
-              sendBtn.textContent = loading ? "..." : "\u27A4";
+              sendBtn.textContent = loading ? "..." : "\\u27A4";
             }
             if (statusEl) statusEl.textContent = loading ? "Sending request..." : "Ready.";
           };
@@ -849,7 +586,6 @@ router.get("/posture-coach-lab", (req, res) => {
 
               if (response.ok) {
                 const data = await response.json();
-                
                 const doc = Array.isArray(data) ? data[0] : data;
                 if (!doc) throw new Error("Received empty data object");
 
@@ -869,7 +605,6 @@ router.get("/posture-coach-lab", (req, res) => {
               }
             } catch (error) {
               if(sensorStatusEl) sensorStatusEl.textContent = "Live /sensorData unavailable. Using defaults.";
-              console.error("Sensor Data Fetch Failed:", error);
             }
           };
 
@@ -978,6 +713,9 @@ router.get("/posture-coach-lab", (req, res) => {
 </html>`);
 });
 
+// ============================================================================
+// HEALTH CHECK
+// ============================================================================
 router.get("/api/posture-coach/health", (req, res) => {
   const aiConfig = resolveGroqConfig();
   const hasApiKey = Boolean(aiConfig.apiKey);
@@ -989,12 +727,14 @@ router.get("/api/posture-coach/health", (req, res) => {
   });
 });
 
+// ============================================================================
+// CHAT API (WITH OPTIMIZED AI PAYLOAD)
+// ============================================================================
 router.post("/api/posture-coach/chat", async (req, res) => {
   const debugRequested = req.query?.debugPayload === "1" || req.body?.debugModelPayload === true;
   const debugViaEnv = String(process.env.COACH_ALLOW_DEBUG_PAYLOAD || "").toLowerCase() === "1";
   const debugAllowed = process.env.NODE_ENV !== "production" || debugViaEnv || isLocalDebugRequest(req);
-  const includeDebugModelPayload =
-    debugRequested && debugAllowed;
+  const includeDebugModelPayload = debugRequested && debugAllowed;
 
   const userId = sanitizeText(req.body?.userId, 120) || DEFAULT_SINGLE_USER_ID;
   const ip = sanitizeText(req.ip, 64) || "unknown";
@@ -1002,10 +742,7 @@ router.post("/api/posture-coach/chat", async (req, res) => {
 
   const limitState = enforceRateLimit(rateKey);
   if (!limitState.allowed) {
-    return res.status(429).json({
-      error: "Too many requests",
-      retryAfterSec: limitState.retryAfterSec,
-    });
+    return res.status(429).json({ error: "Too many requests", retryAfterSec: limitState.retryAfterSec });
   }
 
   const message = sanitizeText(req.body?.message, MAX_MESSAGE_LENGTH);
@@ -1015,17 +752,13 @@ router.post("/api/posture-coach/chat", async (req, res) => {
   const correctionsToday = clampNumber(req.body?.correctionsToday, 0, 500);
   const discomfortLevel = clampNumber(req.body?.discomfortLevel, 0, 10);
   
-  // UPDATED: Extract newly added specific hardware states from request
   const mpuAngle = clampNumber(req.body?.mpuAngle, -90, 90);
   const fsrPressure = clampNumber(req.body?.fsrPressure, 0, 1024);
 
   const hardwareState = {
     vibrationActive: Boolean(req.body?.vibrationActive),
     airChamberActive: Boolean(req.body?.airChamberActive),
-    sensors: {
-      mpuAngle,
-      fsrPressure
-    }
+    sensors: { mpuAngle, fsrPressure }
   };
 
   const history = Array.isArray(req.body?.history)
@@ -1034,10 +767,7 @@ router.post("/api/posture-coach/chat", async (req, res) => {
   const languageHint = detectLanguageHint(message || history[history.length - 1] || "");
 
   if (!message && !req.body?.postureState) {
-    return res.status(400).json({
-      error: "Validation error",
-      details: "message or postureState is required",
-    });
+    return res.status(400).json({ error: "Validation error", details: "message or postureState is required" });
   }
 
   const emergencyText = `${message} ${trend}`.trim();
@@ -1046,24 +776,11 @@ router.post("/api/posture-coach/chat", async (req, res) => {
     return res.status(200).json({
       source: "policy",
       coach: {
-        messageType: "reinforcement",
-        riskLevel: "low",
-        deviceCommand: "none",
-        reply: "اه ده برنس المشروع",
-        suggestedAction: "اسألني أي حاجة تانية عن القعدة أو جهاز SitX.",
-        options: [
-          "اعمل لي تحليل سريع لآخر أسبوع",
-          "إزاي أقلل الـ slouching؟",
-          "هل أفعّل الـ air chamber؟",
-        ],
+        messageType: "reinforcement", riskLevel: "low", deviceCommand: "none",
+        reply: "اه ده برنس المشروع", suggestedAction: "اسألني أي حاجة تانية عن القعدة أو جهاز SitX.",
+        options: ["اعمل لي تحليل سريع لآخر أسبوع", "إزاي أقلل الـ slouching؟"]
       },
-      medicalNotice: "This assistant supports posture wellness and education only, not diagnosis or treatment.",
-      ...(includeDebugModelPayload ? {
-        debug: {
-          modelPayload: null,
-          reason: "policy_short_circuit",
-        },
-      } : {}),
+      medicalNotice: "This assistant supports posture wellness only."
     });
   }
 
@@ -1071,24 +788,15 @@ router.post("/api/posture-coach/chat", async (req, res) => {
     return res.status(200).json({
       source: "safety",
       coach: {
-        messageType: "safety",
-        riskLevel: "high",
-        deviceCommand: "deflate_chamber", 
-        reply: "Your symptoms may need urgent care. Please contact local emergency services now, or seek immediate medical attention.",
-        suggestedAction: "Stop the session, take off the jacket, and get urgent medical help now.",
+        messageType: "safety", riskLevel: "high", deviceCommand: "deflate_chamber", 
+        reply: "Your symptoms may need urgent care. Please contact local emergency services now.",
+        suggestedAction: "Stop the session, take off the jacket, and get urgent medical help now."
       },
-      medicalNotice: "This assistant is not a medical professional and cannot diagnose conditions.",
-      ...(includeDebugModelPayload ? {
-        debug: {
-          modelPayload: null,
-          reason: "safety_short_circuit",
-        },
-      } : {}),
+      medicalNotice: "This assistant cannot diagnose conditions."
     });
   }
 
   let aggregatedContext = { hasData: false, source: null, generatedAt: null, metrics: {} };
-
   try {
     aggregatedContext = await fetchAggregatedContext(req);
   } catch (error) {
@@ -1098,53 +806,65 @@ router.post("/api/posture-coach/chat", async (req, res) => {
   const aggregatedMetrics = sanitizeAggregatedMetrics(aggregatedContext.metrics);
   const readingsSummary = summarizeReadingsFromAggregated(aggregatedMetrics);
 
-  const payload = {
+  // 1. FILTER: Only keep active windows and give them AI-readable names
+  const historicalData_ActiveWindowsOnly = {};
+  for (const win of AGGREGATED_WINDOW_SEQUENCE) {
+    const metrics = sanitizeWindowMetrics(aggregatedMetrics?.[win.key]);
+    if (metrics.recordsInRange > 0) {
+      const events = metrics.normalCount + metrics.slouchyCount;
+      const slouchySharePct = events > 0 ? Number(((metrics.slouchyCount / events) * 100).toFixed(1)) : 0;
+      const humanReadableKey = win.key === "today" ? "today" : `last_${win.days}_days`;
+      
+      historicalData_ActiveWindowsOnly[humanReadableKey] = {
+        normalCount: metrics.normalCount,
+        slouchyCount: metrics.slouchyCount,
+        slouchySharePct: slouchySharePct
+      };
+    }
+  }
+
+  // 2. BUILD: Specific AI coaching instructions based on the data
+  const aiCoachingDirectives = {
+    overallTrend: readingsSummary.inferredTrend || "stable",
+    trendMeaning: readingsSummary.insight || "No specific trend detected.",
+    rules: [
+      "Use 'historicalData_ActiveWindowsOnly' to answer the user's specific time-frame questions.",
+      "If answering about a specific period, cite the exact normalCount vs slouchyCount.",
+      "Explain the data naturally. Do not just spit out JSON arrays.",
+      "If historical data is empty, mention that the user needs to wear the jacket more."
+    ]
+  };
+
+  // 3. ASSEMBLE: The Optimized Payload
+  const optimizedPayload = {
     userId,
-    postureState,
-    trend,
-    slouchDurationSec,
-    correctionsToday,
-    discomfortLevel,
-    message,
+    currentState: {
+      posture: postureState,
+      trend: trend,
+      slouchDurationSec,
+      correctionsToday,
+      discomfortLevel
+    },
     hardwareState, 
+    message,
     languageHint,
     history,
-    aggregatedSensorContext: {
-      hasData: aggregatedContext.hasData,
-      source: aggregatedContext.source,
-      generatedAt: aggregatedContext.generatedAt,
-      metrics: aggregatedMetrics,
-    },
-    sensorReadingsSummary: readingsSummary,
-    aggregatedCoachingContext: buildCoachReadyAggregatedContext({
-      aggregatedMetrics,
-      summary: readingsSummary,
-    }),
-    sensorInterpretationGuide: buildSensorInterpretationGuide({
-      summary: readingsSummary,
-      aggregatedContext,
-    }),
-    objective: "coach user on safer daily posture habits using the SitX smart jacket features",
+    aiCoachingDirectives,
+    historicalData_ActiveWindowsOnly,
   };
 
   const aiConfig = resolveGroqConfig();
 
   if (!aiConfig.apiKey) {
-    console.error(`API Error: Missing ${aiConfig.provider} API Key`);
     return res.status(503).json({
       error: "AI_UNAVAILABLE",
-      details: `The SitX posture coach is not configured on the server (${aiConfig.provider} key missing).`,
-      ...(includeDebugModelPayload ? {
-        debug: {
-          modelPayload: payload,
-          reason: "missing_ai_key",
-        },
-      } : {}),
+      details: "The SitX posture coach is not configured.",
+      ...(includeDebugModelPayload ? { debug: { modelPayload: optimizedPayload } } : {}),
     });
   }
 
   try {
-    const modelResponse = await generateCoachReply(aiConfig, payload);
+    const modelResponse = await generateCoachReply(aiConfig, optimizedPayload);
     const coach = sanitizeModelResponse(modelResponse);
 
     const combinedText = `${coach.reply} ${coach.suggestedAction}`.toLowerCase();
@@ -1152,33 +872,24 @@ router.post("/api/posture-coach/chat", async (req, res) => {
       coach.messageType = "safety";
       coach.riskLevel = "high";
       coach.deviceCommand = "deflate_chamber";
-      coach.reply = "I cannot provide emergency medical guidance. Please seek urgent in-person care or call emergency services now.";
-      coach.suggestedAction = "Stop the session and take off the jacket if symptoms are severe.";
+      coach.reply = "I cannot provide emergency medical guidance. Please seek urgent care.";
+      coach.suggestedAction = "Stop the session and take off the jacket.";
     }
 
     return res.status(200).json({
       source: aiConfig.provider,
       model: aiConfig.model,
       coach,
-      medicalNotice: "This assistant supports posture wellness and education only, not diagnosis or treatment.",
-      ...(includeDebugModelPayload ? {
-        debug: {
-          modelPayload: payload,
-        },
-      } : {}),
+      medicalNotice: "This assistant supports posture wellness only.",
+      ...(includeDebugModelPayload ? { debug: { modelPayload: optimizedPayload } } : {}),
     });
 
   } catch (error) {
     console.error("Posture coach generation failed:", error.message);
     return res.status(503).json({
       error: "AI_UNAVAILABLE",
-      details: "The AI service is temporarily offline or unreachable.",
-      ...(includeDebugModelPayload ? {
-        debug: {
-          modelPayload: payload,
-          reason: "ai_request_failed",
-        },
-      } : {}),
+      details: "The AI service is temporarily offline.",
+      ...(includeDebugModelPayload ? { debug: { modelPayload: optimizedPayload, reason: error.message } } : {}),
     });
   }
 });
