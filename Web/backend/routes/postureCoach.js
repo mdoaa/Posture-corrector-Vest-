@@ -10,12 +10,12 @@ const RATE_WINDOW_MS = 60 * 1000;
 const RATE_LIMIT_COUNT = 20;
 const AGGREGATED_FETCH_TIMEOUT_MS = 4500;
 const AGGREGATED_WINDOW_SEQUENCE = [
-  { key: "today", days: 1 },
-  { key: "week", days: 7 },
-  { key: "twoWeeks", days: 14 },
-  { key: "month", days: 30 },
-  { key: "sixMonths", days: 180 },
-  { key: "year", days: 365 },
+  { key: "last_1_days", days: 1, sourceKeys: ["last_1_days", "today"] },
+  { key: "last_7_days", days: 7, sourceKeys: ["last_7_days", "week"] },
+  { key: "last_14_days", days: 14, sourceKeys: ["last_14_days", "twoWeeks"] },
+  { key: "last_30_days", days: 30, sourceKeys: ["last_30_days", "month"] },
+  { key: "last_180_days", days: 180, sourceKeys: ["last_180_days", "sixMonths"] },
+  { key: "last_360_days", days: 360, sourceKeys: ["last_360_days", "year"] },
 ];
 
 const requestBuckets = new Map();
@@ -124,11 +124,19 @@ const sanitizeAggregatedMetrics = (value) => {
   return sanitized;
 };
 
+const pickWindowMetrics = (aggregatedMetrics, sourceKeys = []) => {
+  for (const sourceKey of sourceKeys) {
+    const metrics = sanitizeWindowMetrics(aggregatedMetrics?.[sourceKey]);
+    if (metrics.recordsInRange > 0) return metrics;
+  }
+  return sanitizeWindowMetrics({});
+};
+
 const summarizeReadingsFromAggregated = (aggregatedMetrics) => {
   const windows = AGGREGATED_WINDOW_SEQUENCE.map((windowDef) => ({
     key: windowDef.key,
     days: windowDef.days,
-    metrics: sanitizeWindowMetrics(aggregatedMetrics?.[windowDef.key]),
+    metrics: pickWindowMetrics(aggregatedMetrics, windowDef.sourceKeys),
   })).filter((item) => item.metrics.recordsInRange > 0);
 
   if (windows.length === 0) {
@@ -182,6 +190,8 @@ const COACH_SYSTEM_PROMPT = [
   "- messageType: One of 'alert', 'action', 'reinforcement', 'insight', 'safety'",
   "- riskLevel: 'low', 'medium', or 'high'",
   "- reply: Specialized coaching advice based on the provided payload.",
+  "- Always compare the user's current state against relevant history windows when available.",
+  "- Always provide 1-3 practical things the user can do next.",
   "- suggestedAction: Specific next step (e.g., 'Inflate the air chamber', 'Take a stretch break')",
   "- deviceCommand: Recommend device action if relevant ('inflate_chamber', 'deflate_chamber', 'enable_vibration', etc.)",
   "- options: 2-4 suggested follow-up actions",
@@ -193,6 +203,7 @@ const COACH_SYSTEM_PROMPT = [
   "DEVICE CONTEXT & DATA (CRITICAL):",
   "- You will receive a structured JSON payload containing 'currentState', 'hardwareState', 'aiCoachingDirectives', and 'historicalData_ActiveWindowsOnly'.",
   "- Use 'currentState' to understand the user's immediate situation.",
+  "- Use 'history' in  replies to preserve context and compare with prior messages.",
   "- Read 'aiCoachingDirectives' for specific rules on how to interpret the data and guide the user.",
   "- Use 'historicalData_ActiveWindowsOnly' ONLY when answering questions about past performance.",
   "- Do not just repeat raw numbers; explain what the patterns mean in simple, friendly words.",
@@ -750,7 +761,6 @@ router.post("/api/posture-coach/chat", async (req, res) => {
   const trend = sanitizeText(req.body?.trend, 40) || "stable";
   const slouchDurationSec = clampNumber(req.body?.slouchDurationSec, 0, 7200);
   const correctionsToday = clampNumber(req.body?.correctionsToday, 0, 500);
-  const discomfortLevel = clampNumber(req.body?.discomfortLevel, 0, 10);
   
   const mpuAngle = clampNumber(req.body?.mpuAngle, -90, 90);
   const fsrPressure = clampNumber(req.body?.fsrPressure, 0, 1024);
@@ -784,7 +794,7 @@ router.post("/api/posture-coach/chat", async (req, res) => {
     });
   }
 
-  if (hasEmergencyContent(emergencyText) || discomfortLevel >= 8) {
+  if (hasEmergencyContent(emergencyText)) {
     return res.status(200).json({
       source: "safety",
       coach: {
@@ -809,13 +819,12 @@ router.post("/api/posture-coach/chat", async (req, res) => {
   // 1. FILTER: Only keep active windows and give them AI-readable names
   const historicalData_ActiveWindowsOnly = {};
   for (const win of AGGREGATED_WINDOW_SEQUENCE) {
-    const metrics = sanitizeWindowMetrics(aggregatedMetrics?.[win.key]);
+    const metrics = pickWindowMetrics(aggregatedMetrics, win.sourceKeys);
     if (metrics.recordsInRange > 0) {
       const events = metrics.normalCount + metrics.slouchyCount;
       const slouchySharePct = events > 0 ? Number(((metrics.slouchyCount / events) * 100).toFixed(1)) : 0;
-      const humanReadableKey = win.key === "today" ? "today" : `last_${win.days}_days`;
-      
-      historicalData_ActiveWindowsOnly[humanReadableKey] = {
+
+      historicalData_ActiveWindowsOnly[win.key] = {
         normalCount: metrics.normalCount,
         slouchyCount: metrics.slouchyCount,
         slouchySharePct: slouchySharePct
@@ -828,10 +837,12 @@ router.post("/api/posture-coach/chat", async (req, res) => {
     overallTrend: readingsSummary.inferredTrend || "stable",
     trendMeaning: readingsSummary.insight || "No specific trend detected.",
     rules: [
-      "Use 'historicalData_ActiveWindowsOnly' to answer the user's specific time-frame questions.",
-      "If answering about a specific period, cite the exact normalCount vs slouchyCount.",
-      "Explain the data naturally. Do not just spit out JSON arrays.",
-      "If historical data is empty, mention that the user needs to wear the jacket more."
+      "Use 'history' in every response to preserve context and compare with previous user messages.",
+      "Use 'historicalData_ActiveWindowsOnly' to compare current status against available windows (1, 7, 14, 30, 180, 360 days).",
+      "If answering about a specific period, cite exact normalCount vs slouchyCount and what it means.",
+      "Always suggest 1-3 concrete actions the user can do now.",
+      "Explain naturally; never output raw JSON in the reply.",
+      "If historical data is empty, clearly ask the user to wear the jacket longer for better insights."
     ]
   };
 
@@ -842,8 +853,7 @@ router.post("/api/posture-coach/chat", async (req, res) => {
       posture: postureState,
       trend: trend,
       slouchDurationSec,
-      correctionsToday,
-      discomfortLevel
+      correctionsToday
     },
     hardwareState, 
     message,

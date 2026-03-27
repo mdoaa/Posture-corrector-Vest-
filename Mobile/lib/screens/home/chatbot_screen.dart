@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:http/http.dart' as http;
 import 'package:sitguard/config.dart';
+import 'package:sitguard/controllers/home/homescreen.dart';
 import 'package:sitguard/controllers/sensors_controller.dart';
 import 'package:sitguard/controllers/settings/usercontroller.dart';
 
@@ -17,6 +18,8 @@ class ChatbotScreen extends StatefulWidget {
 class _ChatbotScreenState extends State<ChatbotScreen> {
   final Sensors sensors = Get.find<Sensors>();
   final UserController userController = Get.find<UserController>();
+  final HomeController? homeController =
+      Get.isRegistered<HomeController>() ? Get.find<HomeController>() : null;
   final TextEditingController inputController = TextEditingController();
   final ScrollController scrollController = ScrollController();
 
@@ -58,6 +61,10 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
     final trend = _deriveTrend();
     final slouchDurationSec = (sensors.sCount.value * 30).clamp(0, 7200);
     final correctionsToday = sensors.totalIncorrect.value.clamp(0, 500);
+    final mpuAngle = (homeController?.slouchySeverity.value ?? 0.0).clamp(-90.0, 90.0);
+    final fsrPressure = (homeController?.rightAndLeftSeverity.value ?? 0.0).clamp(0.0, 1024.0);
+    final vibrationActive = homeController?.vibrationActive.value ?? false;
+    final airChamberActive = homeController?.airChamberActive.value ?? false;
 
     final List<String> history = messages
         .take(messages.length - 1)
@@ -74,7 +81,11 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
       'trend': trend,
       'slouchDurationSec': slouchDurationSec,
       'correctionsToday': correctionsToday,
-      'discomfortLevel': 0,
+      'mpuAngle': mpuAngle,
+      'fsrPressure': fsrPressure,
+      'vibrationActive': vibrationActive,
+      'airChamberActive': airChamberActive,
+      'debugModelPayload': false,
       'history': history.length > 12 ? history.sublist(history.length - 12) : history,
     };
 
