@@ -48,7 +48,10 @@ class Home extends StatelessWidget {
           IconButton(
             icon: Icon(Icons.logout),
             onPressed: () {
-              box.erase(); // Clear stored login credentials
+              box.remove('isLoggedIn');
+              box.remove('email');
+              box.remove('username');
+              userController.updateUser(name: '', email: '');
               Get.offNamed("/login"); // Navigate to login
             },
           ),

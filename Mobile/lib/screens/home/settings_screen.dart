@@ -348,7 +348,9 @@ class SettingsScreen extends StatelessWidget {
                 ),
               ),
               onTap: () {
-                box.erase(); // Clear stored login credentials
+                box.remove('isLoggedIn');
+                box.remove('email');
+                box.remove('username');
                 Get.offNamed("/login");
               },
             ),

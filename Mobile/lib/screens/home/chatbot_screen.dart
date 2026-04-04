@@ -16,7 +16,8 @@ class ChatbotScreen extends StatefulWidget {
   State<ChatbotScreen> createState() => _ChatbotScreenState();
 }
 
-class _ChatbotScreenState extends State<ChatbotScreen> {
+class _ChatbotScreenState extends State<ChatbotScreen>
+    with AutomaticKeepAliveClientMixin {
   final Sensors sensors = Get.find<Sensors>();
   final UserController userController = Get.find<UserController>();
   final GetStorage _box = GetStorage();
@@ -27,6 +28,8 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
 
   final List<_ChatThread> _threads = [];
   String? _activeThreadId;
+  String? _resolvedStorageKey;
+  Worker? _emailWorker;
 
   bool isSending = false;
   static const String _serverUnavailableMessage =
@@ -42,11 +45,15 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
     return _threads[idx];
   }
 
-  String get _storageKey {
-    final rawEmail = userController.email.value.trim().toLowerCase();
+  String _computeStorageKey(String rawEmailValue) {
+    final rawEmail = rawEmailValue.trim().toLowerCase();
     if (rawEmail.isEmpty) return 'chat_threads_mobile_user';
     final safe = rawEmail.replaceAll(RegExp(r'[^a-z0-9@._-]'), '_');
     return 'chat_threads_$safe';
+  }
+
+  String get _storageKey {
+    return _resolvedStorageKey ?? _computeStorageKey(userController.email.value);
   }
 
   String get _storageActiveKey => '${_storageKey}_active';
@@ -54,14 +61,49 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
   @override
   void initState() {
     super.initState();
+    _resolvedStorageKey = _computeStorageKey(userController.email.value);
     _loadThreads();
+
+    _emailWorker = ever<String>(userController.email, _handleEmailChanged);
   }
 
   @override
   void dispose() {
+    _emailWorker?.dispose();
     inputController.dispose();
     scrollController.dispose();
     super.dispose();
+  }
+
+  @override
+  bool get wantKeepAlive => true;
+
+  void _handleEmailChanged(String newEmail) {
+    final nextStorageKey = _computeStorageKey(newEmail);
+    final currentStorageKey = _storageKey;
+    if (nextStorageKey == currentStorageKey) {
+      return;
+    }
+
+    // Persist current chat state before switching to another identity key.
+    _persistThreads();
+
+    final currentThreadsRaw = _box.read(currentStorageKey);
+    final currentActiveRaw = _box.read('${currentStorageKey}_active');
+    final nextHasThreads = _box.hasData(nextStorageKey);
+
+    // If target key has no history yet, migrate from current key to keep continuity.
+    if (!nextHasThreads && currentThreadsRaw != null) {
+      _box.write(nextStorageKey, currentThreadsRaw);
+      if (currentActiveRaw != null) {
+        _box.write('${nextStorageKey}_active', currentActiveRaw);
+      }
+    }
+
+    _resolvedStorageKey = nextStorageKey;
+    setState(() {
+      _loadThreads();
+    });
   }
 
   _ChatThread _createThreadWithWelcome() {
@@ -358,6 +400,7 @@ class _ChatbotScreenState extends State<ChatbotScreen> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final activeThread = _activeThread;
     final messages = activeThread?.messages ?? const <_ChatMessage>[];
