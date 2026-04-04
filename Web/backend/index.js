@@ -306,18 +306,28 @@ app.use(passport.initialize());
 app.use(passport.session());
 
 let lastTimestampMillis = null;
-setInterval(async () => {
-  const latestData = await SitxSensor.findOne().sort({ receivedAt: -1 });
+setInterval(() => {
+  void (async () => {
+    try {
+      if (mongoose.connection.readyState !== 1) {
+        return;
+      }
 
-  if (latestData) {
-    // Convert the Date object to milliseconds for comparison
-    const currentTimestampMillis = latestData.receivedAt.getTime();
+      const latestData = await SitxSensor.findOne().sort({ receivedAt: -1 });
 
-    if (currentTimestampMillis !== lastTimestampMillis) {
-      lastTimestampMillis = currentTimestampMillis;
-      io.emit("sensorData", latestData);
+      if (latestData) {
+        // Convert the Date object to milliseconds for comparison
+        const currentTimestampMillis = latestData.receivedAt.getTime();
+
+        if (currentTimestampMillis !== lastTimestampMillis) {
+          lastTimestampMillis = currentTimestampMillis;
+          io.emit("sensorData", latestData);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to refresh latest sensor data:", err.message);
     }
-  }
+  })();
 }, 3000);
 
 mongoose
@@ -339,7 +349,7 @@ app.use("/", postureCoachRouter);
 app.get("/protected", authMiddleWare, (req, res) => {
   res.json({ message: "This is a protected route", userId: req.user });
 });
-app.get("admin/protected", authMiddleWare, adminMiddleware, (req, res) => {
+app.get("/admin/protected", authMiddleWare, adminMiddleware, (req, res) => {
   res.json({
     message: "This is a protected route for admin",
     userId: req.userId,
