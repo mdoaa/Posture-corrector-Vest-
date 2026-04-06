@@ -456,24 +456,21 @@ void publishAllData() {
 // --- BLE Write Callback ---
 class WiFiCredentialCallback : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic* pCharacteristic) override {
-    // 1. نستقبل الداتا بالصيغة القياسية الأول
-    std::string rxValue = pCharacteristic->getValue(); 
+    // سطر واحد ينهي الجدل: نحصل على القيمة كـ String أردوينو مباشرة
+    String value = pCharacteristic->getValue(); 
+
+    if (value.length() == 0) return; // التأكد إنها مش فاضية
+
+    // باقية الكود بتاعك زي ما هو...
+    if (!value.startsWith("WIFI:")) return;
     
-    // 2. نحولها لـ String بتاع الأردوينو عشان الكود بتاعك يفهمه
-    String value = String(rxValue.c_str()); 
-
-    if (value.isEmpty()) return;
-    // Expected format: "WIFI:<ssid>:<password>"
-    String data = String(value.c_str());
-    if (!data.startsWith("WIFI:")) return;
-
-    int firstColon = data.indexOf(':', 5);
+    int firstColon = value.indexOf(':', 5);
     if (firstColon < 0) return;
 
-    String ssid     = data.substring(5, firstColon);
-    String password = data.substring(firstColon + 1);
+    String ssid     = value.substring(5, firstColon);
+    String password = value.substring(firstColon + 1);
 
-    // Store in Preferences (NVS)
+    // تخزين البيانات...
     preferences.begin("wifi", false);
     preferences.putString("ssid", ssid);
     preferences.putString("pass", password);
