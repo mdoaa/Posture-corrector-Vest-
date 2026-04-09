@@ -22,17 +22,15 @@ We would like to acknowledge the SitX team for their multidisciplinary contribut
 ---
 
 ## 📌 Overview
+SitX is an active posture training ecosystem designed to function as a preventative, digital physical therapist. Moving beyond traditional passive braces and simple vibration trackers, SitX integrates a lightweight smart vest with a proprietary SaaS mobile application.
 
-SitX is an innovative solution to the physical strain caused by prolonged sitting. Unlike passive monitors that only provide alerts, SitX is a smart jacket that uses an array of sensors to detect slouching and provides active physical correction through pneumatic air chambers.
-
-The system is fully integrated, allowing users to track their progress via a Flutter mobile app. All data is handled by a Node.js backend using MQTT for real-time performance and MongoDB Atlas for long-term storage.
+At its core, SitX uses a single MPU spatial sensor combined with a custom AI classification model to detect postural errors accurately. When a bad posture is sustained, the system intervenes physically using a dynamic pneumatic Lumbar Add-on. The system is fully integrated, syncing real-time data via an MQTT-to-Node.js pipeline into a MongoDB Atlas database, providing actionable analytics and personalized corrective exercises through a Flutter app.
 
 ### Key Features
-- **Continuous Biometric Monitoring**: Force-sensitive mapping and gyroscopic sensors
-- **Active Correction**: Pneumatic air pumps provide physical nudges
-- **Redundant Connectivity**: Dual Wi‑Fi and multi‑broker MQTT
-- **Health Analytics**: Mild, Moderate, Severe posture deviation tracking
-
+- **AI-Driven Spatial Tracking**: Advanced posture classification using raw MPU kinematics (No bulky FSRs required).
+- **Active Coaching**: The app maps specific postural errors to personalized corrective exercises.
+- **Dynamic Pneumatic Support**: Miniature air pumps and solenoid valves provide physical lower-back reinforcement exactly when muscles reach peak fatigue.
+- **Privacy-First Architecture**: 100% reliant on discrete motion sensors, entirely eliminating the need for privacy-invasive cameras.
 ---
 
 ## 🎥 Demo / Examples
@@ -64,30 +62,28 @@ The firmware includes a robust network stack that automatically switches between
 ## Usage Instructions
 
 ### 1. Hardware Operation & Calibration
-The SitX jacket is designed for "Set and Forget" operation once calibrated.
-
-* Initial Calibration: Upon wearing the jacket, sit in your ideal upright position and short-press the Right Button. The system will set the current Pitch/Roll and FSR values as the "Zero" reference. The OLED will display CALIBRATED.
-* Manual Valve Override: If you wish to deflate the pneumatic chambers manually, long-press the Right Button for 2 seconds. This opens the relief valves.
-* Haptic Toggle: Short-press the Left Button to toggle the vibration motor wave ON/OFF. The status will update on the OLED.
+* **Initial Calibration (Zero-Point Reset):** Over time, IMU sensors may experience slight drift. Users can easily reset their "neutral" baseline position directly from the Mobile App to ensure the AI model receives accurate reference points.
+* **Manual Pneumatic Override:** If the user requires immediate lower-back comfort outside of the automatic AI triggers, they can manually inflate or deflate the air chambers via the app's manual control dashboard.
 
 ### 2. Logic & Actuation Flow
-The firmware follows a multi-stage logic gate to prevent false positives:
+The firmware follows a multi-stage logic gate to prevent false positives (e.g., bending down to pick up a pen):
+1. **Detection:** The ESP32 continuously polls the MPU sensor.
+2. **AI Classification:** The model interprets the spatial data to identify states like "Slouching" or "Leaning."
+3. **Time-Delay Validation:** A timer starts to ensure the poor posture is sustained for a specific duration (e.g., 15 seconds) before reacting.
+4. **Intervention:** The system triggers instant haptic feedback and activates the pneumatic pumps to correct the spinal alignment.
+5. **Active Coaching:** The app logs the specific error and prescribes a personalized corrective stretch based on the fatigued muscle group.
 
-1.  Detection: The ESP32 polls the 4 FSR sensors and the MPU6050 every 100ms.
-2.  Validation: If the sensors detect a "Slouch" or "Lean" (e.g., Pitch > 10°), a timer starts.
-3.  Haptic Alert: After 15 seconds of continuous poor posture, a vibration wave is triggered across the 8 motors along the back.
-4.  Pneumatic Correction: If the user does not correct their posture, the system activates the Pumps to inflate the corrective air chambers.
-5.  Data Sync: Every 5 seconds, the system sends a JSON payload via MQTT containing real-time angles, counter increments, and hardware states.
+
 
 ---
 ## Tech Stack
 
-* Flutter & GetX: Mobile application development.
-* React: Web landing page and customer portal.
-* Node.js & MQTT: Real-time backend communication.
-* MongoDB Atlas: Cloud storage for session logs.
-* C++/Arduino: Firmware for ESP32 and sensor fusion.
-
+* **Mobile App:** Flutter & GetX (State Management).
+* **AI Model:** Custom ML posture classification model based on biomechanical datasets.
+* **Web Storefront:** React (hosted on Vercel).
+* **Backend:** Node.js (RESTful API) & MQTT Broker.
+* **Database:** MongoDB Atlas (Time-series data storage).
+* **Hardware:** ESP32 Microcontroller, C++/Arduino firmware, MPU6500, Miniature Air Pumps, Solenoid Valves, 5V Relay.
 ---
 
 
