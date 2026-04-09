@@ -29,6 +29,9 @@ const sitxSensorSchema = new mongoose.Schema({
   z: Number,
   zz: Number,
   zzz: Number,
+  vibrationActiveDurationSec: Number,
+  airChamberActiveDurationSec: Number,
+  valveOpenDurationSec: Number,
   timestamp: Number,
   receivedAt: Date
 }, { collection: 'Sitxsensor' });
