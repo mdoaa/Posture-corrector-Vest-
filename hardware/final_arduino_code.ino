@@ -28,7 +28,6 @@ Adafruit_MPU6050 mpu;
 // --- Pin Map (Updated for Myosa Board) ---
 const int fsrPins[] = {36, 39, 34, 35};
 const int motorPins[] = {25, 26, 27, 33};
-const int pushButtonPins[] = {12, 14};
 const int relayPins[] = {17, 16, 4}; // [0]=Pump1, [1]=Pump2, [2]=Valve
 
 // --- New Global for OLED Logging ---
@@ -96,6 +95,8 @@ struct States {
   bool manualControl = false; // Master switch for manual mode
   bool manualInflate = false;
   bool manualDeflate = false;
+  bool manualVibration = false;
+  bool manualCalibration = false;
 } states;
 
 // --- Average Helpers ---
@@ -198,17 +199,60 @@ void mqttCallback(const String& topic, const String& message) {
   
   if (cmd == "manual") {
     states.manualControl = doc["state"];
+    if (!states.manualControl) {
+      states.manualVibration = false;
+      states.manualCalibration = false;
+    }
     lastLog = states.manualControl ? "Manual: ON" : "Manual: OFF";
   } 
   else if (cmd == "inflate") {
-    states.manualControl = true; 
+    if (!states.manualControl) {
+      lastLog = "Ignored: Inflate (Manual OFF)";
+      updateOLED();
+      return;
+    }
+    states.manualInflate = true;
+    states.manualDeflate = false;
     startPumpOperation(pumpDurations[0]); // تشغيل المضخة
     lastLog = "CMD: Inflate";
   } 
   else if (cmd == "deflate") {
-    states.manualControl = true;
+    if (!states.manualControl) {
+      lastLog = "Ignored: Deflate (Manual OFF)";
+      updateOLED();
+      return;
+    }
+    states.manualDeflate = true;
+    states.manualInflate = false;
     openValve(); // فتح الصمام
     lastLog = "CMD: Deflate";
+  }
+  else if (cmd == "vibration") {
+    if (!states.manualControl) {
+      lastLog = "Ignored: Vibration (Manual OFF)";
+      updateOLED();
+      return;
+    }
+    bool state = doc["state"] | false;
+    states.manualVibration = state;
+    states.vibrationEnabled = state;
+    lastLog = state ? "CMD: Vib ON" : "CMD: Vib OFF";
+  }
+  else if (cmd == "calibration") {
+    if (!states.manualControl) {
+      lastLog = "Ignored: Calibration (Manual OFF)";
+      updateOLED();
+      return;
+    }
+    bool state = doc["state"] | false;
+    states.manualCalibration = state;
+    if (state) {
+      calibrateMPU();
+      states.manualCalibration = false;
+      lastLog = "CMD: Calibrated";
+    } else {
+      lastLog = "CMD: Calibration OFF";
+    }
   }
   updateOLED();
 }
@@ -456,21 +500,20 @@ void publishAllData() {
 // --- BLE Write Callback ---
 class WiFiCredentialCallback : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic* pCharacteristic) override {
-    // سطر واحد ينهي الجدل: نحصل على القيمة كـ String أردوينو مباشرة
-    String value = pCharacteristic->getValue(); 
+String value = pCharacteristic->getValue();
+    if (value.isEmpty()) return;
 
-    if (value.length() == 0) return; // التأكد إنها مش فاضية
+    // Expected format: "WIFI:<ssid>:<password>"
+    String data = String(value.c_str());
+    if (!data.startsWith("WIFI:")) return;
 
-    // باقية الكود بتاعك زي ما هو...
-    if (!value.startsWith("WIFI:")) return;
-    
-    int firstColon = value.indexOf(':', 5);
+    int firstColon = data.indexOf(':', 5);
     if (firstColon < 0) return;
 
-    String ssid     = value.substring(5, firstColon);
-    String password = value.substring(firstColon + 1);
+    String ssid     = data.substring(5, firstColon);
+    String password = data.substring(firstColon + 1);
 
-    // تخزين البيانات...
+    // Store in Preferences (NVS)
     preferences.begin("wifi", false);
     preferences.putString("ssid", ssid);
     preferences.putString("pass", password);
@@ -669,46 +712,6 @@ void closeValve() {
   updateOLED();
 }
 
-// --- BUTTON SERVICE ---
-void serviceRightButton() {
-  static bool prev = false;
-  static unsigned long pressStart = 0;
-  bool current = digitalRead(pushButtonPins[0]) == HIGH;
-    
-  if (current && !prev) pressStart = millis();
-  if (!current && prev) {
-    unsigned long held = millis() - pressStart;
-    if (held >= 2000) {
-      if (!states.manualControl) { 
-        states.pumpsWereRunning = false;
-        if (states.valveOpen) closeValve();
-        else openValve();
-      }
-    } else if (held >= 1) {
-       calibrateMPU();
-    }
-  }
-  prev = current;
-}
-
-void serviceLeftButton() {
-  static bool prev = false;
-  static unsigned long pressStart = 0;
-  bool current = digitalRead(pushButtonPins[1]) == HIGH;
-
-  if (current && !prev) pressStart = millis();
-  if (!current && prev) {
-    unsigned long held = millis() - pressStart;
-    if (held >= 1 && held <= 9000) {
-      states.vibrationEnabled = !states.vibrationEnabled;
-      lastLog = states.vibrationEnabled ? "Vib: ON" : "Vib: OFF";
-      updateOLED();
-      delay(500);
-    }
-  }
-  prev = current;
-}
-
 void setup() {
   Serial.begin(115200);
   delay(1000);
@@ -724,7 +727,6 @@ void setup() {
 
   // Setup Pins
   for (int pin : motorPins) pinMode(pin, OUTPUT);
-  for (int pin : pushButtonPins) pinMode(pin, INPUT);
   for (int pin : relayPins) pinMode(pin, OUTPUT);
     
   // Relays OFF
@@ -773,10 +775,6 @@ void setup() {
 
 void loop() {
   unsigned long now = millis();
-
-  // Service Inputs
-  serviceRightButton();
-  serviceLeftButton();
 
   // Network Maintenance
   checkNetwork();
