@@ -13,6 +13,7 @@ const WINDOW_DEFINITIONS = [
 
 const PREAGGREGATION_TTL_MS = 60 * 1000;
 const STALE_ON_TAIL_LIMIT_SEC = 60;
+const AGGREGATION_ALGORITHM_VERSION = 'v3-gap-capped-2026-04-09';
 
 const toNumber = (value) => Number(value || 0);
 
@@ -37,8 +38,16 @@ const computeTransitionAndDuration = ({ records, baselineState, field, rangeStar
         };
     }
 
-    let previousState = null;
-    let previousAt = null;
+    const toCappedDurationSec = (startAt, endAt) => {
+        const rawDurationSec = (endAt.getTime() - startAt.getTime()) / 1000;
+        return Math.max(0, Math.min(rawDurationSec, STALE_ON_TAIL_LIMIT_SEC));
+    };
+
+    const hasBaseline = baselineState !== undefined && baselineState !== null;
+    const baselineBool = hasBaseline ? toBool(baselineState) : null;
+
+    let previousState = hasBaseline ? baselineBool : null;
+    let previousAt = rangeStart;
     let openedCount = 0;
     let activeDurationSec = 0;
 
@@ -50,32 +59,24 @@ const computeTransitionAndDuration = ({ records, baselineState, field, rangeStar
 
         const currentState = toBool(record[field]);
 
-        if (previousState === null) {
-            // Initialize on first valid record
-            previousState = currentState;
-            previousAt = at;
-        } else {
-            // Count time when previousState was true
-            if (previousState) {
-                activeDurationSec += Math.max(0, (at.getTime() - previousAt.getTime()) / 1000);
-            }
+        if (previousState !== null && previousState) {
+            activeDurationSec += toCappedDurationSec(previousAt, at);
+        }
 
-            // Count transitions
+        // Count transitions. If baseline is known, the first in-range true after false is counted.
+        if (previousState !== null) {
             if (currentState && !previousState) {
                 openedCount += 1;
             }
-
-            previousState = currentState;
-            previousAt = at;
         }
+
+        previousState = currentState;
+        previousAt = at;
     }
 
     // Handle tail: if still in active state, add time until now (capped by STALE limit)
     if (previousState && previousAt) {
-        const cappedTailEnd = new Date(
-            Math.min(rangeEnd.getTime(), previousAt.getTime() + STALE_ON_TAIL_LIMIT_SEC * 1000)
-        );
-        activeDurationSec += Math.max(0, (cappedTailEnd.getTime() - previousAt.getTime()) / 1000);
+        activeDurationSec += toCappedDurationSec(previousAt, rangeEnd);
     }
 
     return {
@@ -249,6 +250,7 @@ const getPreaggregatedPayload = async () => {
 
     if (hasAnyCache && isFresh) {
         return {
+            aggregationVersion: AGGREGATION_ALGORITHM_VERSION,
             generatedAt: preaggregationCache.generatedAt,
             metrics: preaggregationCache.aggregatedMetrics,
         };
@@ -260,6 +262,7 @@ const getPreaggregatedPayload = async () => {
         });
 
         return {
+            aggregationVersion: AGGREGATION_ALGORITHM_VERSION,
             generatedAt: preaggregationCache.generatedAt,
             metrics: preaggregationCache.aggregatedMetrics,
         };
@@ -267,6 +270,16 @@ const getPreaggregatedPayload = async () => {
 
     const cache = await refreshPreaggregationCache({ force: true });
     return {
+        aggregationVersion: AGGREGATION_ALGORITHM_VERSION,
+        generatedAt: cache.generatedAt,
+        metrics: cache.aggregatedMetrics,
+    };
+};
+
+const getFreshPreaggregatedPayload = async () => {
+    const cache = await refreshPreaggregationCache({ force: true });
+    return {
+        aggregationVersion: AGGREGATION_ALGORITHM_VERSION,
         generatedAt: cache.generatedAt,
         metrics: cache.aggregatedMetrics,
     };
@@ -343,10 +356,22 @@ const getSensorRoutes = (io) => {
     router.get('/sensorHistory/aggregated', async (req, res) => {
         try {
             const payload = await getPreaggregatedPayload();
+            res.set('Cache-Control', 'no-store');
             return res.status(200).json(payload);
         } catch (err) {
             console.error('Error fetching aggregated sensor history:', err);
             return res.status(500).json({ error: 'error fetching aggregated sensor history from database' });
+        }
+    });
+
+    router.get('/sensorHistory/aggregated/refresh', async (req, res) => {
+        try {
+            const payload = await getFreshPreaggregatedPayload();
+            res.set('Cache-Control', 'no-store');
+            return res.status(200).json(payload);
+        } catch (err) {
+            console.error('Error force-refreshing aggregated sensor history:', err);
+            return res.status(500).json({ error: 'error force-refreshing aggregated sensor history from database' });
         }
     });
 
