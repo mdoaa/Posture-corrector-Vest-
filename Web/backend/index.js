@@ -253,6 +253,24 @@ io.on("connection", (socket) => {
     publishControlCommand("deflate", { cmd: "deflate" }, "Deflate command sent via MQTT");
   });
 
+  // تفعيل/إلغاء الاهتزاز اليدوي
+  socket.on("vibrationControl", (data) => {
+    publishControlCommand(
+      "vibrationControl",
+      { cmd: "vibration", state: data?.state },
+      `Vibration mode set to ${data?.state}`
+    );
+  });
+
+  // تفعيل/إلغاء الكاليبراشن اليدوي
+  socket.on("calibrationControl", (data) => {
+    publishControlCommand(
+      "calibrationControl",
+      { cmd: "calibration", state: data?.state },
+      `Calibration mode set to ${data?.state}`
+    );
+  });
+
   socket.on("disconnect", () => {
     console.log("Client disconnected from socket.io");
     publishMqttLog("socket_disconnected", { socketId: socket.id });
