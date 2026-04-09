@@ -2,6 +2,7 @@ import { useState } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import { FaEye, FaEyeSlash } from "react-icons/fa";
+import { useUser } from "./UserContext";
 
 const Login = () => {
   const [email, setEmail] = useState("");
@@ -9,6 +10,7 @@ const Login = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const { setUser } = useUser();
 
   const img = (path) => process.env.PUBLIC_URL + path;
 
@@ -24,7 +26,8 @@ const Login = () => {
         { withCredentials: true }
       );
 
-      if (response.data?.message) {
+      if (response.data?.user) {
+        setUser(response.data.user);
         navigate("/");
       } else {
         alert("Invalid Credentials");
