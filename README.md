@@ -17,8 +17,7 @@ We would like to acknowledge the SitX team for their multidisciplinary contribut
 | Doaa Mohamed        | Web Developer                   | [mdoaa](https://github.com/mdoaa) |
 | Abdulrahman Ehab    | Hardware Design                 | [Abdo2496](https://github.com/Abdo2496) |
 | Rawan Ahmed         | Mobile Developer                | [rrahmed43](https://github.com/rrahmed43) |
-| Omar Ahmed          | Data Analysis & Hardware Code   | [Opop1omar4645545](https://github.com/Opop1omar4645545) |
-| Farah Abdel-Fattah  | System Integration              | [farah2375](https://github.com/farah2375) |
+| Omar Ahmed          | Data scientist & Hardware Code   | [Opop1omar4645545](https://github.com/Opop1omar4645545) |
 
 ---
 
@@ -46,14 +45,6 @@ The system is fully integrated, allowing users to track their progress via a Flu
 | *Front view* | *Corrective chambers* | *ESP32 & PCB* | *Dashboard* |
 
 ---
-
-### 🎬 Video Demo
-
-```html
-<video controls width="100%">
-  <source src="demo.mp4" type="video/mp4">
-</video>
-```
 
 ---
 
