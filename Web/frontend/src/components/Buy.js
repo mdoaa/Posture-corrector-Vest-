@@ -1,7 +1,7 @@
 import NavBar from "./Nav";
 import Footer from "./Footer";
-import  { useState, useEffect } from "react";
-import axios from "axios";
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useCart } from "./CartContext";
 
 const images = [
@@ -11,43 +11,24 @@ const images = [
 
 const Buy = () => {
   const [currentIndex, setCurrentIndex] = useState(0);
-  //const { user } = useUser();
-  const [, setProducts] = useState([]);
-  const [selectedProduct, setSelectedProduct] = useState(null);
   const [selectedColor, setSelectedColor] = useState("black");
   const { addToCart } = useCart();
+  const navigate = useNavigate();
+
+  const featuredProduct = {
+    _id: "sitx-posture-vest-50",
+    name: "SitX Posture Corrector Vest",
+    description: "Premium posture support vest for everyday desk work.",
+    price: 50,
+    image: "vestfront.jpg",
+  };
 
   const img = (path) => process.env.PUBLIC_URL + path;
 
-  useEffect(() => {
-    axios
-      .get("https://sitx-backend-new.onrender.com/products")
-      .then((res) => {
-        setProducts(res.data);
-        if (res.data.length > 0) {
-          setSelectedProduct(res.data[0]);
-        }
-      })
-      .catch((err) => console.error("Error fetching products:", err));
-  }, []);
-
-  const handleBuy = () => {
-    if (selectedProduct) {
-      addToCart(selectedProduct._id);
-    }
+  const handleBuy = async () => {
+    await addToCart(featuredProduct);
+    navigate("/cart");
   };
-
-  if (!selectedProduct) {
-    return (
-      <>
-        <NavBar />
-        <div className="flex h-[60vh] items-center justify-center text-slate-600">
-          Loading products...
-        </div>
-        <Footer />
-      </>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-[#FBFBFC] text-slate-900">
@@ -90,7 +71,7 @@ const Buy = () => {
           {/* RIGHT: Info */}
           <div>
             <h1 className="text-3xl font-semibold tracking-tight md:text-4xl">
-              {selectedProduct.name}
+              {featuredProduct.name}
             </h1>
 
             <div className="mt-4 text-sm text-slate-600">
@@ -98,7 +79,7 @@ const Buy = () => {
             </div>
 
             <div className="mt-6 text-3xl font-semibold text-slate-900">
-              ${selectedProduct.price}
+              ${featuredProduct.price.toFixed(2)}
             </div>
 
             {/* Color */}
@@ -132,7 +113,7 @@ const Buy = () => {
                 onClick={handleBuy}
                 className="w-full rounded-xl bg-slate-900 px-6 py-4 text-lg font-medium text-white shadow-lg shadow-black/10 transition hover:translate-y-[-2px] hover:bg-black"
               >
-                🛒 Add to Cart
+                Buy Now for $50
               </button>
             </div>
 
