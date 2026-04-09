@@ -39,10 +39,10 @@ The system is fully integrated, allowing users to track their progress via a Flu
 
 ### 📷 Images
 
-| System View | Hardware View | Mobile App (Dashboard) | Mobile App (Control) |
-| :---: |:---: | :---: | :---: |
-| <img src="/system.jpg" width="200">|<img src="/vest.jpg" width="400"> | <img src="/mobilee.jpg" width="200"> | <img src="/mobile2.jpg" width="200"> |
-| *Base Vest* | *Lumbar Add-on* | *ESP32 & MPU Sensor* | *Live Dashboard* | *Manual Control* |
+| System View | Hardware View | Mobile App (Dashboard) | Mobile App (chatbot) |Mobile App (states) | Mobile App (manual control) |
+| :---: |:---: | :---: |:---: | :---: | :---: |
+| <img src="/system.jpg" width="200">|<img src="/vest.jpg" width="400"> | <img src="/mobilee.jpg" width="200"> | <img src="/mobile2.jpg" width="200"> | | <img src="/states.jpg" width="200"> | <img src="/manual.jpg" width="200"> |
+| *All the project* | *main vest | *Live Dashboard* | *chatbot* | *States* | *Manual Control* |
 
 ---
 
