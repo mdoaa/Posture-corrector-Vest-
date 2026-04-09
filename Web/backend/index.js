@@ -248,9 +248,25 @@ io.on("connection", (socket) => {
     publishControlCommand("inflate", { cmd: "inflate" }, "Inflate command sent via MQTT");
   });
 
+  socket.on("inflateControl", (data) => {
+    publishControlCommand(
+      "inflateControl",
+      { cmd: "inflate", state: data?.state },
+      `Inflate control set to ${data?.state}`
+    );
+  });
+
   // زرار التفريغ
   socket.on("deflate", () => {
     publishControlCommand("deflate", { cmd: "deflate" }, "Deflate command sent via MQTT");
+  });
+
+  socket.on("deflateControl", (data) => {
+    publishControlCommand(
+      "deflateControl",
+      { cmd: "deflate", state: data?.state },
+      `Deflate control set to ${data?.state}`
+    );
   });
 
   // تفعيل/إلغاء الاهتزاز اليدوي
