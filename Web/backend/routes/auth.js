@@ -16,6 +16,33 @@ const generateOtp = () =>
 
 const router = express.Router();
 
+const AUTH_ATTEMPT_LIMIT = 5;
+const AUTH_ATTEMPT_WINDOW_MS = 60 * 60 * 1000;
+const authAttemptStore = new Map();
+
+const authAttemptLimiter = (req, res, next) => {
+  const now = Date.now();
+  const key = req.ip || req.socket?.remoteAddress || "unknown";
+  const bucket = authAttemptStore.get(key);
+
+  if (!bucket || now > bucket.resetAt) {
+    authAttemptStore.set(key, { count: 1, resetAt: now + AUTH_ATTEMPT_WINDOW_MS });
+    return next();
+  }
+
+  if (bucket.count >= AUTH_ATTEMPT_LIMIT) {
+    const retryAfterSeconds = Math.ceil((bucket.resetAt - now) / 1000);
+    res.set("Retry-After", String(retryAfterSeconds));
+    return res.status(429).json({
+      error: "Too many login/register attempts. Try again in 1 hour.",
+    });
+  }
+
+  bucket.count += 1;
+  authAttemptStore.set(key, bucket);
+  return next();
+};
+
 const sendOtpEmail = async (email, otp) => {
   try {
     console.log("BREVO_API_KEY exists:", !!process.env.BREVO_API_KEY);
@@ -110,7 +137,7 @@ router.post("/verify-otp", async (req, res) => {
   }
 });
 
-router.post("/register", async (req, res) => {
+router.post("/register", authAttemptLimiter, async (req, res) => {
   console.time("RegisterAPI");
   const { username, email, password } = req.body;
   try {
@@ -132,7 +159,7 @@ router.post("/register", async (req, res) => {
   }
 });
 
-router.post("/login", async (req, res) => {
+router.post("/login", authAttemptLimiter, async (req, res) => {
   console.time("LoginAPI"); // Start timing
 
   const { email, password } = req.body;
@@ -194,7 +221,7 @@ router.post("/logout", (req, res) => {
   //.log(token);
 });
 
-router.post("/admin/login", async (req, res) => {
+router.post("/admin/login", authAttemptLimiter, async (req, res) => {
   const { email, password } = req.body;
 
   //console.log(email);
