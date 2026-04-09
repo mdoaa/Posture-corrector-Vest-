@@ -171,17 +171,15 @@ const buildHistoryWindowAggregate = async (days) => {
 
     // Legacy packed counters in history:
     // k => pump/air-chamber opens, l => vibration opens.
-    // Some deployments may later store duration-like counters directly.
     const vibrationOpenedCount = deltaCounter('l') || vibrationDerived.openedCount || slouchyCount;
     const airChamberOpenedCount = deltaCounter('k') || pumpDerived.openedCount;
     const valveOpenedCount = deltaCounter('m') || valveDerived.openedCount;
 
-    const vibrationActiveDurationSec =
-        deltaCounter('vibrationActiveDurationSec') || vibrationDerived.activeDurationSec;
-    const airChamberActiveDurationSec =
-        deltaCounter('airChamberActiveDurationSec') || pumpDerived.activeDurationSec;
-    const valveOpenDurationSec =
-        deltaCounter('valveOpenDurationSec') || valveDerived.activeDurationSec;
+    // Always use computed durations from state transitions, never stored values
+    // (stored values may be outdated or calculated over different time ranges)
+    const vibrationActiveDurationSec = vibrationDerived.activeDurationSec;
+    const airChamberActiveDurationSec = pumpDerived.activeDurationSec;
+    const valveOpenDurationSec = valveDerived.activeDurationSec;
 
     return {
         days,
