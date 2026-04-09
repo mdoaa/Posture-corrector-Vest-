@@ -12,6 +12,7 @@ const WINDOW_DEFINITIONS = [
 ];
 
 const PREAGGREGATION_TTL_MS = 60 * 1000;
+const STALE_ON_TAIL_LIMIT_SEC = 60;
 
 const toNumber = (value) => Number(value || 0);
 
@@ -54,7 +55,10 @@ const computeTransitionAndDuration = ({ records, baselineState, field, rangeStar
     }
 
     if (previousState) {
-        activeDurationSec += Math.max(0, (rangeEnd.getTime() - previousAt.getTime()) / 1000);
+        const cappedTailEnd = new Date(
+            Math.min(rangeEnd.getTime(), previousAt.getTime() + STALE_ON_TAIL_LIMIT_SEC * 1000)
+        );
+        activeDurationSec += Math.max(0, (cappedTailEnd.getTime() - previousAt.getTime()) / 1000);
     }
 
     return {
