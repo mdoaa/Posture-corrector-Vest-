@@ -41,7 +41,7 @@ The system is fully integrated, allowing users to track their progress via a Flu
 
 | System View | Hardware View | Mobile App (Dashboard) | Mobile App (Control) |
 | :---: |:---: | :---: | :---: |
-| <img src="/system.jpg" width="200">|<img src="/hardware.jpg" width="400"> | <img src="/mobilee.jpg" width="200"> | <img src="/mobile2.jpg" width="200"> |
+| <img src="/system.jpg" width="200">|<img src="/vest.jpg" width="400"> | <img src="/mobilee.jpg" width="200"> | <img src="/mobile2.jpg" width="200"> |
 | *Base Vest* | *Lumbar Add-on* | *ESP32 & MPU Sensor* | *Live Dashboard* | *Manual Control* |
 
 ---
