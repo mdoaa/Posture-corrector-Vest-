@@ -30,8 +30,15 @@ const toValidDate = (value) => {
 };
 
 const computeTransitionAndDuration = ({ records, baselineState, field, rangeStart, rangeEnd }) => {
-    let previousState = toBool(baselineState);
-    let previousAt = rangeStart;
+    if (!records.length) {
+        return {
+            openedCount: 0,
+            activeDurationSec: 0,
+        };
+    }
+
+    let previousState = null;
+    let previousAt = null;
     let openedCount = 0;
     let activeDurationSec = 0;
 
@@ -41,20 +48,30 @@ const computeTransitionAndDuration = ({ records, baselineState, field, rangeStar
             continue;
         }
 
-        if (previousState) {
-            activeDurationSec += Math.max(0, (at.getTime() - previousAt.getTime()) / 1000);
-        }
-
         const currentState = toBool(record[field]);
-        if (currentState && !previousState) {
-            openedCount += 1;
-        }
 
-        previousState = currentState;
-        previousAt = at;
+        if (previousState === null) {
+            // Initialize on first valid record
+            previousState = currentState;
+            previousAt = at;
+        } else {
+            // Count time when previousState was true
+            if (previousState) {
+                activeDurationSec += Math.max(0, (at.getTime() - previousAt.getTime()) / 1000);
+            }
+
+            // Count transitions
+            if (currentState && !previousState) {
+                openedCount += 1;
+            }
+
+            previousState = currentState;
+            previousAt = at;
+        }
     }
 
-    if (previousState) {
+    // Handle tail: if still in active state, add time until now (capped by STALE limit)
+    if (previousState && previousAt) {
         const cappedTailEnd = new Date(
             Math.min(rangeEnd.getTime(), previousAt.getTime() + STALE_ON_TAIL_LIMIT_SEC * 1000)
         );
@@ -160,11 +177,11 @@ const buildHistoryWindowAggregate = async (days) => {
     const valveOpenedCount = deltaCounter('m') || valveDerived.openedCount;
 
     const vibrationActiveDurationSec =
-        deltaCounter('vibrationActiveDurationSec') || vibrationDerived.activeDurationSec || vibrationOpenedCount;
+        deltaCounter('vibrationActiveDurationSec') || vibrationDerived.activeDurationSec;
     const airChamberActiveDurationSec =
-        deltaCounter('airChamberActiveDurationSec') || pumpDerived.activeDurationSec || airChamberOpenedCount;
+        deltaCounter('airChamberActiveDurationSec') || pumpDerived.activeDurationSec;
     const valveOpenDurationSec =
-        deltaCounter('valveOpenDurationSec') || valveDerived.activeDurationSec || valveOpenedCount;
+        deltaCounter('valveOpenDurationSec') || valveDerived.activeDurationSec;
 
     return {
         days,
