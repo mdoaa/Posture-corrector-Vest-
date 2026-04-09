@@ -13,6 +13,26 @@ import { getOrCreateGuestId } from "./UtilityGuest";
 const CartContext = createContext();
 export const useCart = () => useContext(CartContext);
 
+const LOCAL_CART_KEY = "sitx-local-cart";
+
+const readLocalCart = () => {
+  if (typeof window === "undefined") return [];
+
+  try {
+    const raw = window.localStorage.getItem(LOCAL_CART_KEY);
+    const items = raw ? JSON.parse(raw) : [];
+    return Array.isArray(items) ? items : [];
+  } catch {
+    return [];
+  }
+};
+
+const writeLocalCart = (items) => {
+  if (typeof window === "undefined") return;
+
+  window.localStorage.setItem(LOCAL_CART_KEY, JSON.stringify(items));
+};
+
 export const CartProvider = ({ children }) => {
   const { user } = useUser();
   const [products, setProducts] = useState([]);
@@ -35,6 +55,7 @@ export const CartProvider = ({ children }) => {
   const fetchCartProducts = useCallback(async () => {
     try {
       let cartResponse;
+      const localCart = readLocalCart();
 
       if (!user) {
         const guestId = getOrCreateGuestId();
@@ -60,10 +81,30 @@ export const CartProvider = ({ children }) => {
         )
       );
 
-      setProducts(productData);
-      updateSubtotal(productData);
+      if (productData.length > 0) {
+        setProducts(productData);
+        updateSubtotal(productData);
+        return;
+      }
+
+      if (localCart.length > 0) {
+        setProducts(localCart);
+        updateSubtotal(localCart);
+        return;
+      }
+
+      setProducts([]);
+      updateSubtotal([]);
     } catch (err) {
       console.error("Failed to fetch cart products:", err);
+      const localCart = readLocalCart();
+
+      if (localCart.length > 0) {
+        setProducts(localCart);
+        updateSubtotal(localCart);
+        return;
+      }
+
       setProducts([]);
       updateSubtotal([]);
     }
@@ -74,8 +115,11 @@ export const CartProvider = ({ children }) => {
   }, [fetchCartProducts]);
 
   const addToCart = useCallback(
-    async (productId) => {
+    async (productOrId) => {
       try {
+        const productId =
+          typeof productOrId === "object" ? productOrId._id : productOrId;
+
         if (!user) {
           const guestId = getOrCreateGuestId();
           await axios.post(
@@ -94,9 +138,39 @@ export const CartProvider = ({ children }) => {
         await fetchCartProducts();
       } catch (error) {
         console.error("Failed to add item to cart:", error);
+
+        if (typeof productOrId === "object" && productOrId) {
+          const localCart = readLocalCart();
+          const productId = productOrId._id || `local-${Date.now()}`;
+          const existingItem = localCart.find((item) => item._id === productId);
+          const nextCart = existingItem
+            ? localCart.map((item) =>
+                item._id === productId
+                  ? { ...item, quantity: (Number(item.quantity) || 0) + 1 }
+                  : item
+              )
+            : [
+                ...localCart,
+                {
+                  _id: productId,
+                  name: productOrId.name || "SitX Posture Corrector Vest",
+                  description:
+                    productOrId.description ||
+                    "Premium posture support vest for everyday desk work.",
+                  price: Number(productOrId.price) || 50,
+                  image: productOrId.image || "vestfront.jpg",
+                  quantity: 1,
+                  _local: true,
+                },
+              ];
+
+          writeLocalCart(nextCart);
+          setProducts(nextCart);
+          updateSubtotal(nextCart);
+        }
       }
     },
-    [API, user, fetchCartProducts]
+    [API, user, fetchCartProducts, updateSubtotal]
   );
 
   const updateQuantity = useCallback(
@@ -104,6 +178,20 @@ export const CartProvider = ({ children }) => {
       try {
         const qty = Number(quantity);
         if (!Number.isFinite(qty) || qty < 1) return;
+
+        const localCart = readLocalCart();
+        const localItem = localCart.find((item) => item._id === productId);
+
+        if (localItem) {
+          const next = localCart.map((item) =>
+            item._id === productId ? { ...item, quantity: qty } : item
+          );
+
+          writeLocalCart(next);
+          setProducts(next);
+          updateSubtotal(next);
+          return;
+        }
 
         const item = await axios.get(`${API}/product/${productId}`, {
           withCredentials: true,
@@ -146,6 +234,17 @@ export const CartProvider = ({ children }) => {
   const removeFromCart = useCallback(
     async (productId) => {
       try {
+        const localCart = readLocalCart();
+        const localItem = localCart.find((item) => item._id === productId);
+
+        if (localItem) {
+          const next = localCart.filter((item) => item._id !== productId);
+          writeLocalCart(next);
+          setProducts(next);
+          updateSubtotal(next);
+          return;
+        }
+
         const guestId = user ? null : getOrCreateGuestId();
 
         await axios.delete(`${API}/product/${productId}`, {
