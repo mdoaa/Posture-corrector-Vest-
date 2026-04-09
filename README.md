@@ -27,7 +27,7 @@ SitX is an active posture training ecosystem designed to function as a preventat
 At its core, SitX uses a single MPU spatial sensor combined with a custom AI classification model to detect postural errors accurately. When a bad posture is sustained, the system intervenes physically using a dynamic pneumatic Lumbar Add-on. The system is fully integrated, syncing real-time data via an MQTT-to-Node.js pipeline into a MongoDB Atlas database, providing actionable analytics and personalized corrective exercises through a Flutter app.
 
 ### Key Features
-- **AI-Driven Spatial Tracking**: Advanced posture classification using raw MPU kinematics (No bulky FSRs required).
+- **AI-Driven Spatial Tracking**: Advanced posture classification using raw MPU kinematics .
 - **Active Coaching**: The app maps specific postural errors to personalized corrective exercises.
 - **Dynamic Pneumatic Support**: Miniature air pumps and solenoid valves provide physical lower-back reinforcement exactly when muscles reach peak fatigue.
 - **Privacy-First Architecture**: 100% reliant on discrete motion sensors, entirely eliminating the need for privacy-invasive cameras.
@@ -110,34 +110,6 @@ node -v
 npm -v
 flutter --version
 ```
-
----
-
-### 🔧 Backend (Node.js – REST / API)
-
-This service handles backend logic for the web application.
-
-```bash
-cd web/backend
-npm install
-npm start
-```
-
-📍 Runs on: `http://localhost:5000`
-
----
-
-### 🌐 Frontend (React – Web Dashboard)
-
-Open a **new terminal window** and run:
-
-```bash
-cd web/frontend
-npm install
-npm start
-```
-
-📍 Runs on: `http://localhost:3000`
 
 ---
 
