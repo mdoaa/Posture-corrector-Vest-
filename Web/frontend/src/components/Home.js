@@ -92,7 +92,7 @@ const Home = () => {
 
               <div className="mt-8 flex flex-col gap-3 sm:flex-row">
                 <a
-                  href="buynow"
+                  href="/buyNow"
                   className="group inline-flex items-center justify-center rounded-xl bg-slate-900 px-6 py-3 font-medium text-white shadow-lg shadow-black/10 transition hover:translate-y-[-1px] hover:bg-black"
                 >
                   Order Now
