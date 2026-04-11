@@ -26,7 +26,6 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 Adafruit_MPU6050 mpu; 
 
 // --- Pin Map (Updated for Myosa Board) ---
-const int fsrPins[] = {36, 39, 34, 35};
 const int motorPins[] = {25, 26, 27, 33};
 const int relayPins[] = {17, 16, 4}; // [0]=Pump1, [1]=Pump2, [2]=Valve
 
@@ -81,11 +80,6 @@ struct States {
   bool pumpRunning = false;
   bool valveOpen = false;
   bool systemLocked = false;
-  bool fsr2WasHighest = false;
-  bool fsr3WasHighest = false;
-  bool fsr4WasHighest = false;
-  bool initialPumpActivation = true;
-  bool pumpsWereRunning = false;
   bool wifiConnected = false;
   bool mqttConnected = false;
   bool calibrationStarted = false;
@@ -99,12 +93,6 @@ struct States {
   bool manualCalibration = false;
 } states;
 
-// --- Average Helpers ---
-struct Averages {
-  float avg1 = 0, avg2 = 0;
-  uint8_t avg1Count = 0, avg2Count = 0;
-} averages;
-
 // --- Calibration Data ---
 struct Calibration {
   float refPitch = 0;
@@ -113,12 +101,8 @@ struct Calibration {
 
 // --- Timing Constants ---
 const uint16_t slouchDelay = 15000;
-const uint16_t fsr234Duration = 5000;
-const uint16_t fsr1Duration = 15000;
 const uint16_t pumpDurations[] = {27500, 20000, 10000};
 const uint16_t valveOpenDuration = 60000;
-const uint16_t avg1Duration = 10000;
-const uint16_t avg2Interval = 25000;
 const uint16_t vibrationCooldown = 3000;
 const uint16_t mpuCheckInterval = 100;
 const uint16_t printInterval = 1000;
@@ -164,11 +148,8 @@ struct TimeKeeper {
   unsigned long lastCounterLeftIncrement = 0;
   unsigned long lastCounterNormalIncrement = 0;
   unsigned long lastCounterSlouchIncrement = 0;
-  unsigned long fsrHighStart[4] = {0};
   unsigned long valveCloseTime = 0;
   unsigned long pumpStopTime = 0;
-  unsigned long avg1StartTime = 0;
-  unsigned long lastAvg2Calc = 0;
   unsigned long lastReconnectAttempt = 0;
   unsigned long lastWiFiAttempt = 0;
   unsigned long lastPitchUpdate = 0;
@@ -211,10 +192,20 @@ void mqttCallback(const String& topic, const String& message) {
       updateOLED();
       return;
     }
-    states.manualInflate = true;
-    states.manualDeflate = false;
-    startPumpOperation(pumpDurations[0]); // تشغيل المضخة
-    lastLog = "CMD: Inflate";
+
+    bool hasState = doc.containsKey("state");
+    bool requestedState = doc["state"] | false;
+
+    if (!hasState || requestedState) {
+      states.manualInflate = true;
+      states.manualDeflate = false;
+      startPumpOperation(pumpDurations[0]); // تشغيل المضخة
+      lastLog = "CMD: Inflate ON";
+    } else {
+      states.manualInflate = false;
+      stopPumpOperation();
+      lastLog = "CMD: Inflate OFF";
+    }
   } 
   else if (cmd == "deflate") {
     if (!states.manualControl) {
@@ -222,10 +213,20 @@ void mqttCallback(const String& topic, const String& message) {
       updateOLED();
       return;
     }
-    states.manualDeflate = true;
-    states.manualInflate = false;
-    openValve(); // فتح الصمام
-    lastLog = "CMD: Deflate";
+
+    bool hasState = doc.containsKey("state");
+    bool requestedState = doc["state"] | false;
+
+    if (!hasState || requestedState) {
+      states.manualDeflate = true;
+      states.manualInflate = false;
+      openValve(); // فتح الصمام
+      lastLog = "CMD: Deflate ON";
+    } else {
+      states.manualDeflate = false;
+      closeValve();
+      lastLog = "CMD: Deflate OFF";
+    }
   }
   else if (cmd == "vibration") {
     if (!states.manualControl) {
@@ -239,11 +240,6 @@ void mqttCallback(const String& topic, const String& message) {
     lastLog = state ? "CMD: Vib ON" : "CMD: Vib OFF";
   }
   else if (cmd == "calibration") {
-    if (!states.manualControl) {
-      lastLog = "Ignored: Calibration (Manual OFF)";
-      updateOLED();
-      return;
-    }
     bool state = doc["state"] | false;
     states.manualCalibration = state;
     if (state) {
@@ -480,6 +476,7 @@ void publishAllData() {
   doc["z"] = percentages.right;
   doc["zz"] = percentages.left;
   doc["zzz"] = percentages.slouch;
+  doc["m"] = states.calibrationStarted ? static_cast<int>(counters.calibrationMinute) : -1;
   
   // Report Manual State
   doc["manual"] = states.manualControl;
@@ -647,15 +644,11 @@ void calibrateMPU() {
 
   calibration.refPitch = atan2(ay, az) * 180.0 / PI; 
   calibration.refRoll = atan2(ax, sqrt(ay * ay + az * az)) * 180.0 / PI; 
-  
-  // Reset logic
-  for(int i=0; i<4; i++) timeKeeper.fsrHighStart[i] = 0;
-  averages.avg1 = 0; averages.avg2 = 0;
-  averages.avg1Count = 0;
-  averages.avg2Count = 0;
     
   states.mpuCalibrated = true;
   states.calibrationStarted = true;
+  counters.calibrationMinute = 0;
+  timeKeeper.calibrationStartTime = millis();
     
   lastLog = "Calibrated!";
   updateOLED();
@@ -680,10 +673,6 @@ void startPumpOperation(int duration) {
   states.pumpRunning = true;
   timeKeeper.pumpStopTime = millis() + duration;
   counters.pump++;
-    
-  if (duration == pumpDurations[0]) states.fsr2WasHighest = true;
-  else if (duration == pumpDurations[1]) states.fsr3WasHighest = true;
-  else if (duration == pumpDurations[2]) states.fsr4WasHighest = true;
   
   updateOLED();
 }
@@ -692,7 +681,6 @@ void stopPumpOperation() {
   digitalWrite(relayPins[0], HIGH);
   digitalWrite(relayPins[1], HIGH);
   states.pumpRunning = false;
-  states.pumpsWereRunning = true;
   updateOLED();
 }
 
@@ -800,109 +788,46 @@ void loop() {
     setupWiFi();
   }
 
-  // FSR Readings
-  int fsrReadings[4];
-  for (int i = 0; i < 4; i++) fsrReadings[i] = analogRead(fsrPins[i]);
-  int maxFsr = 0;
-  for(int i=0; i<4; i++) { if(fsrReadings[i] > maxFsr) maxFsr = fsrReadings[i]; }
+  // --- MPU Posture Logic ---
+  if (states.mpuCalibrated && now - timeKeeper.lastMPUCheck >= mpuCheckInterval) {
+    timeKeeper.lastMPUCheck = now;
+    float pitch, roll;
+    getSensorReadings(pitch, roll);
 
-  // ---------------------------------------------------------
-  // AUTOMATIC CONTROL LOGIC (Only runs if Manual is FALSE)
-  // ---------------------------------------------------------
-  if (!states.manualControl) {
-    
-    // --- FSR Logic ---
-    if (states.mpuCalibrated) {
-      for (int i = 1; i < 4; i++) { // FSR 2,3,4
-        if (fsrReadings[i] == maxFsr && fsrReadings[i] > 1) {
-          if (!timeKeeper.fsrHighStart[i]) timeKeeper.fsrHighStart[i] = now;
-          else if (now - timeKeeper.fsrHighStart[i] >= fsr234Duration && 
-                   !states.pumpRunning && !states.valveOpen && !states.pumpsWereRunning) {
-            startPumpOperation(pumpDurations[i - 1]);
-            timeKeeper.fsrHighStart[i] = 0;
-          }
-          
-          if(i==1) { // Average Calculation Logic (FSR 2)
-            if (now - timeKeeper.avg1StartTime <= avg1Duration) {
-               averages.avg1 += fsrReadings[1];
-               averages.avg1Count++;
-               timeKeeper.avg1StartTime = now;
-               timeKeeper.lastAvg2Calc = now;
-            } else if (now - timeKeeper.lastAvg2Calc <= 15000) {
-               averages.avg2 += fsrReadings[1];
-               averages.avg2Count++; 
-            } else if (now - timeKeeper.lastAvg2Calc > 15000) {
-               if(averages.avg1Count > 0 && averages.avg2Count > 0) {
-                 float diff = fabs(averages.avg2 / averages.avg2Count) - fabs(averages.avg1 / averages.avg1Count);
-                 if(diff > 2000) triggerVibrationWave();
-               }
-               if (now - timeKeeper.lastPitchUpdate >= 2000) {
-                 counters.pitchModerate++;
-                 timeKeeper.lastPitchUpdate = now;
-               }
-               timeKeeper.lastAvg2Calc = now;
-               averages.avg2 = 0; averages.avg2Count = 0;
-            }
-          }
-        } else { timeKeeper.fsrHighStart[i] = 0;
-        }
+    // FIX: Strictly greater than 10 degrees forward, up to 180
+    bool isForward = (pitch > 10 && pitch <= 180);
+    bool isRight = roll > 10;
+    bool isLeft = roll < -10;
+
+    if ((isForward || isLeft || isRight)) {
+      if (now - timeKeeper.slouchStart >= slouchDelay && now - timeKeeper.lastVibration >= vibrationCooldown) {
+         if (!states.manualControl) triggerVibrationWave();
+         timeKeeper.lastVibration = now;
+      }
+      if (isForward && now - timeKeeper.lastCounterSlouchIncrement >= 20000) {
+         counters.slouch++;
+         timeKeeper.lastCounterSlouchIncrement = now;
+      }
+      if (isLeft && now - timeKeeper.lastCounterLeftIncrement >= 20000) {
+         counters.left++;
+         timeKeeper.lastCounterLeftIncrement = now;
+      }
+      if (isRight && now - timeKeeper.lastCounterRightIncrement >= 20000) {
+         counters.right++;
+         timeKeeper.lastCounterRightIncrement = now;
+      }
+    } else {
+      timeKeeper.slouchStart = now;
+      if (now - timeKeeper.lastCounterNormalIncrement >= 20000) {
+         counters.normal++;
+         timeKeeper.lastCounterNormalIncrement = now;
       }
     }
+  }
 
-    // FSR 1 Logic (Vibration)
-    if (fsrReadings[0] == maxFsr && fsrReadings[0] > 1){
-       if (!timeKeeper.fsrHighStart[0]) timeKeeper.fsrHighStart[0] = now;
-       else if (now - timeKeeper.fsrHighStart[0] >= fsr1Duration) {
-         triggerVibrationWave();
-         if (now - timeKeeper.lastPitchUpdate >= 2000) {
-           counters.pitchModerate++;
-           timeKeeper.lastPitchUpdate = now;
-         }
-       }
-    } else { timeKeeper.fsrHighStart[0] = 0;
-    }
-
-    // --- MPU Posture Logic ---
-    if (states.mpuCalibrated && now - timeKeeper.lastMPUCheck >= mpuCheckInterval) {
-      timeKeeper.lastMPUCheck = now;
-      float pitch, roll;
-      getSensorReadings(pitch, roll);
-
-      // FIX: Strictly greater than 10 degrees forward, up to 180
-      bool isForward = (pitch > 10 && pitch <= 180); 
-      bool isRight = roll > 10;
-      bool isLeft = roll < -10;
-
-      if ((isForward || isLeft || isRight)) {
-        if (now - timeKeeper.slouchStart >= slouchDelay && now - timeKeeper.lastVibration >= vibrationCooldown) {
-           triggerVibrationWave();
-           timeKeeper.lastVibration = now;
-        }
-        if (isForward && now - timeKeeper.lastCounterSlouchIncrement >= 20000) {
-           counters.slouch++;
-           timeKeeper.lastCounterSlouchIncrement = now;
-        }
-        if (isLeft && now - timeKeeper.lastCounterLeftIncrement >= 20000) {
-           counters.left++;
-           timeKeeper.lastCounterLeftIncrement = now;
-        }
-        if (isRight && now - timeKeeper.lastCounterRightIncrement >= 20000) {
-           counters.right++;
-           timeKeeper.lastCounterRightIncrement = now;
-        }
-      } else {
-        timeKeeper.slouchStart = now;
-        if (now - timeKeeper.lastCounterNormalIncrement >= 20000) {
-           counters.normal++;
-           timeKeeper.lastCounterNormalIncrement = now;
-        }
-      }
-    }
-    
-    // Auto Shutdown
-    if (states.valveOpen && timeKeeper.valveCloseTime < now) closeValve();
-    if (states.pumpRunning && timeKeeper.pumpStopTime < now) stopPumpOperation();
-  } 
+  // Auto Shutdown
+  if (states.valveOpen && timeKeeper.valveCloseTime < now) closeValve();
+  if (states.pumpRunning && timeKeeper.pumpStopTime < now) stopPumpOperation();
 
   // --- Global Time-based Counters ---
   if (now - timeKeeper.lastCounterIncrement >= timeInterval) {
