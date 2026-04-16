@@ -1,0 +1,395 @@
+import express from "express";
+import cors from "cors";
+import dotenv from "dotenv";
+import cookieParser from "cookie-parser";
+import mongoose from "mongoose";
+import authRouter from "./routes/auth.js";
+import authMiddleWare from "./middleware/authmiddleware.js";
+import cartRoutes from "./routes/cart.js";
+import adminRoutes from "./routes/adminRoutes.js";
+import adminMiddleware from "./middleware/adminMiddleware.js";
+import session from "express-session";
+import passport from "passport";
+import "./config/passport.js";
+import googleAuthRouter from "./routes/googleAuth.js";
+import getSensorRoutes from "./routes/sensor.js";
+import postureCoachRouter from "./routes/postureCoach.js";
+import path from "path";
+import { fileURLToPath } from "url";
+import { Server } from "socket.io";
+import SitxSensor from "./models/sensor.js";
+import SitxHistory from "./models/sensorHistory.js";
+import http from "http";
+import mqtt from "mqtt"; // <-- تم إضافة مكتبة MQTT
+
+dotenv.config();
+
+const app = express();
+app.use(express.json());
+const port = process.env.PORT || 8080;
+const server = http.createServer(app);
+const parseCsvEnv = (value) =>
+  String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+const isLocalDevOrigin = (origin) =>
+  /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(String(origin || ""));
+
+const allowedOrigins = parseCsvEnv(process.env.ALLOWED_ORIGINS);
+const socketAllowedOrigins = parseCsvEnv(process.env.SOCKET_ALLOWED_ORIGINS);
+const resolvedSocketOrigins =
+  socketAllowedOrigins.length > 0 ? socketAllowedOrigins : allowedOrigins;
+
+const io = new Server(server, {
+  cors: {
+    origin: resolvedSocketOrigins.length > 0 ? resolvedSocketOrigins : true,
+    methods: ["GET", "POST"],
+    credentials: true,
+  },
+});
+
+// ==========================================
+// إعدادات MQTT على broker HiveMQ العام (بدون يوزر/باسورد)
+// ==========================================
+const MQTT_BROKER = process.env.MQTT_BROKER || "mqtt://broker.hivemq.com:1883";
+const MQTT_TOPIC_DATA = process.env.MQTT_TOPIC_DATA || "SitGuard/sensor/data/12345";
+const MQTT_TOPIC_CONTROL =
+  process.env.MQTT_TOPIC_CONTROL || "SitGuard/device/control/12345";
+const MQTT_TOPIC_LOGS = process.env.MQTT_TOPIC_LOGS || "SitGuard/backend/logs/12345";
+
+const mqttConnectOptions = {
+  username: process.env.MQTT_USERNAME || undefined,
+  password: process.env.MQTT_PASSWORD || undefined,
+  clientId: process.env.MQTT_CLIENT_ID || undefined,
+};
+
+const mqttClient = mqtt.connect(MQTT_BROKER, mqttConnectOptions);
+
+const publishMqttLog = (event, details = {}) => {
+  const logPayload = {
+    source: "backend",
+    event,
+    ts: new Date().toISOString(),
+    ...details,
+  };
+
+  // Keep local debug visibility in Node console while mirroring logs to MQTT.
+  console.log("[CTRL-LOG]", JSON.stringify(logPayload));
+  mqttClient.publish(MQTT_TOPIC_LOGS, JSON.stringify(logPayload));
+};
+
+mqttClient.on("connect", () => {
+  console.log("Connected to HiveMQ public broker ✅");
+  mqttClient.subscribe(MQTT_TOPIC_DATA, (err) => {
+    if (!err) {
+      console.log(`Subscribed to MQTT Topic: ${MQTT_TOPIC_DATA}`);
+    }
+  });
+});
+
+mqttClient.on("error", (err) => {
+  console.error("MQTT client error:", err.message);
+});
+
+mqttClient.on("offline", () => {
+  console.warn("MQTT client is offline");
+});
+
+mqttClient.on("reconnect", () => {
+  console.warn("MQTT client reconnecting...");
+});
+
+// استقبال البيانات من الأردوينو عبر الـ MQTT بدلاً من HTTP
+mqttClient.on("message", async (topic, message) => {
+  if (topic === MQTT_TOPIC_DATA) {
+    try {
+      const payload = JSON.parse(message.toString());
+      // console.log("MQTT Payload received:", payload);
+      await processSensorPayload(payload);
+    } catch (err) {
+      console.error("Failed to parse MQTT message:", err);
+    }
+  }
+});
+// ==========================================
+
+const COUNTER_FIELDS = [
+  "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p",
+  "q", "r", "s", "t", "u", "v", "y", "z", "zz", "zzz",
+];
+
+const isSensorPayload = (payload) => {
+  if (!payload || typeof payload !== "object") {
+    return false;
+  }
+
+  if (payload.eventType) {
+    return false;
+  }
+
+  return payload.timestamp !== undefined || payload.a !== undefined || payload.d !== undefined;
+};
+
+const updateHistoryFromSensor = async (newSensorData) => {
+  const [lastHistory, lastSensor] = await Promise.all([
+    SitxHistory.findOne().sort({ receivedAt: -1 }).lean(),
+    SitxSensor.findOne({ _id: { $ne: newSensorData._id } }).sort({ receivedAt: -1 }).lean(),
+  ]);
+
+  let newHistoryData;
+
+  if (!lastHistory) {
+    newHistoryData = { ...newSensorData.toObject() };
+  } else {
+    newHistoryData = { ...newSensorData.toObject() };
+
+    for (const field of COUNTER_FIELDS) {
+      const currentSensorValue = Number(newSensorData[field] || 0);
+      const lastSensorValue = Number(lastSensor?.[field] || 0);
+      const lastHistoryValue = Number(lastHistory[field] || 0);
+
+      if (currentSensorValue !== 0) {
+        if (currentSensorValue !== lastSensorValue) {
+          newHistoryData[field] = Math.max(currentSensorValue, lastHistoryValue + 1);
+        } else {
+          newHistoryData[field] = lastHistoryValue;
+        }
+      } else {
+        newHistoryData[field] = lastHistoryValue;
+      }
+    }
+  }
+
+  if (lastHistory) {
+    const hasChanges = COUNTER_FIELDS.some((field) =>
+      Number(newHistoryData[field] || 0) !== Number(lastHistory[field] || 0)
+    );
+
+    if (!hasChanges) {
+      return lastHistory;
+    }
+  }
+
+  const historyEntry = new SitxHistory(newHistoryData);
+  await historyEntry.save();
+  return historyEntry;
+};
+
+const processSensorPayload = async (payload) => {
+  if (!isSensorPayload(payload)) {
+    return null;
+  }
+
+  const newSensorData = new SitxSensor({
+    ...payload,
+    receivedAt: new Date(),
+  });
+
+  await newSensorData.save();
+  const historyData = await updateHistoryFromSensor(newSensorData);
+  io.emit("sensorData", newSensorData);
+  io.emit("sensorHistoryData", historyData);
+  return newSensorData;
+};
+
+// Socket.io listeners from web dashboard (تم تفعيل الأزرار لترسل عبر MQTT).
+io.on("connection", (socket) => {
+  console.log("Client connected to socket.io");
+  publishMqttLog("socket_connected", { socketId: socket.id });
+
+  const publishControlCommand = (sourceEvent, payload, successMessage) => {
+    const command = JSON.stringify(payload);
+    publishMqttLog("control_event_received", {
+      socketId: socket.id,
+      sourceEvent,
+      payload,
+    });
+
+    mqttClient.publish(MQTT_TOPIC_CONTROL, command, (err) => {
+      if (err) {
+        publishMqttLog("control_publish_failed", {
+          socketId: socket.id,
+          sourceEvent,
+          topic: MQTT_TOPIC_CONTROL,
+          error: err.message,
+        });
+        socket.emit("controlStatus", {
+          ok: false,
+          message: `${sourceEvent} command failed to send`,
+          error: err.message,
+        });
+        return;
+      }
+
+      publishMqttLog("control_publish_success", {
+        socketId: socket.id,
+        sourceEvent,
+        topic: MQTT_TOPIC_CONTROL,
+        command: payload,
+      });
+      socket.emit("controlStatus", { ok: true, message: successMessage });
+    });
+  };
+
+  // تفعيل/إلغاء وضع التحكم اليدوي
+  socket.on("manualControl", (data) => {
+    // data.state should be true or false
+    publishControlCommand(
+      "manualControl",
+      { cmd: "manual", state: data?.state },
+      `Manual mode set to ${data?.state}`
+    );
+  });
+
+  // زرار النفخ
+  socket.on("inflate", () => {
+    publishControlCommand("inflate", { cmd: "inflate" }, "Inflate command sent via MQTT");
+  });
+
+  socket.on("inflateControl", (data) => {
+    publishControlCommand(
+      "inflateControl",
+      { cmd: "inflate", state: data?.state },
+      `Inflate control set to ${data?.state}`
+    );
+  });
+
+  // زرار التفريغ
+  socket.on("deflate", () => {
+    publishControlCommand("deflate", { cmd: "deflate" }, "Deflate command sent via MQTT");
+  });
+
+  socket.on("deflateControl", (data) => {
+    publishControlCommand(
+      "deflateControl",
+      { cmd: "deflate", state: data?.state },
+      `Deflate control set to ${data?.state}`
+    );
+  });
+
+  // تفعيل/إلغاء الاهتزاز اليدوي
+  socket.on("vibrationControl", (data) => {
+    publishControlCommand(
+      "vibrationControl",
+      { cmd: "vibration", state: data?.state },
+      `Vibration mode set to ${data?.state}`
+    );
+  });
+
+  // تفعيل/إلغاء الكاليبراشن اليدوي
+  socket.on("calibrationControl", (data) => {
+    publishControlCommand(
+      "calibrationControl",
+      { cmd: "calibration", state: data?.state },
+      `Calibration mode set to ${data?.state}`
+    );
+  });
+
+  socket.on("disconnect", () => {
+    console.log("Client disconnected from socket.io");
+    publishMqttLog("socket_disconnected", { socketId: socket.id });
+  });
+});
+
+// middleware
+app.use(cookieParser());
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Allow server-to-server and tools without an Origin header.
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      // If ALLOWED_ORIGINS is not configured, do not block requests.
+      if (allowedOrigins.length === 0) {
+        return callback(null, true);
+      }
+
+      // Always allow localhost during development to simplify local testing.
+      if (process.env.NODE_ENV !== "production" && isLocalDevOrigin(origin)) {
+        return callback(null, true);
+      }
+
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(new Error("Not allowed by CORS"));
+    },
+    credentials: true, // If sending cookies or authentication headers
+  })
+);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Make 'uploads/' folder publicly accessible
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+
+app.use(
+  session({
+    secret: process.env.JWT_SECRET_KEY,
+    resave: false,
+    saveUninitialized: false,
+  })
+);
+app.use(passport.initialize());
+app.use(passport.session());
+
+let lastTimestampMillis = null;
+setInterval(() => {
+  void (async () => {
+    try {
+      if (mongoose.connection.readyState !== 1) {
+        return;
+      }
+
+      const latestData = await SitxSensor.findOne().sort({ receivedAt: -1 });
+
+      if (latestData) {
+        // Convert the Date object to milliseconds for comparison
+        const currentTimestampMillis = latestData.receivedAt.getTime();
+
+        if (currentTimestampMillis !== lastTimestampMillis) {
+          lastTimestampMillis = currentTimestampMillis;
+          io.emit("sensorData", latestData);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to refresh latest sensor data:", err.message);
+    }
+  })();
+}, 3000);
+
+mongoose
+  .connect(process.env.MONGOURI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+  })
+  .then(() => console.log("connected to mongodb ✅"))
+  .catch((err) => console.log("error in connection to mongodb", err));
+
+app.use("/", authRouter);
+app.use("/auth", googleAuthRouter);
+app.use("/", cartRoutes);
+app.use("/", adminRoutes);
+// app.use('/', sensorRoutes);
+app.use("/", getSensorRoutes(io));
+app.use("/", postureCoachRouter);
+
+app.get("/protected", authMiddleWare, (req, res) => {
+  res.json({ message: "This is a protected route", userId: req.user });
+});
+app.get("/admin/protected", authMiddleWare, adminMiddleware, (req, res) => {
+  res.json({
+    message: "This is a protected route for admin",
+    userId: req.userId,
+  });
+});
+
+server.listen(port, () =>
+  console.log("server is running on port " + port + " ✅")
+);
